@@ -51,6 +51,18 @@ class Item extends Entity {
         // The parent's updateAnimation call in super.update() would handle the frame switching.
     }
 
+    // Method called by the Player when collision occurs
+    collect(player) {
+        console.log(`Item ${this.id} collected by Player ${player.id}`);
+        // Placeholder logic:
+        // - Add item to player inventory (future)
+        // - Increase score (future)
+        // - Play sound effect (future)
+
+        // Mark the item as 'dead' so it can be removed
+        this.setState('dead');
+    }
+
     // Override draw if needed, e.g., to draw differently than base Entity
     // draw(context) {
     //     super.draw(context); // Call parent draw or implement custom drawing
@@ -61,8 +73,8 @@ class Item extends Entity {
     //     console.log(`Item ${this.id} collided with ${otherEntity.type}`);
     //     // Example: Item gets collected by player
     //     if (otherEntity.type === 'player') {
-    //         this.setState('dead'); // Mark for removal or trigger collection logic
-    //         // Potentially add to player inventory, score, etc.
+    //         this.collect(otherEntity); // Call the collect method
+    //         // Potentially add to player inventory, score, etc. // Moved to collect()
     //     }
     // }
 
