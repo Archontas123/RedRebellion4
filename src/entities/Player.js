@@ -6,7 +6,7 @@ export class Player extends PhysicalObject {
     constructor(x, y, inputHandler, options = {}) {
         // Player specific defaults
         options.type = 'player';
-        options.friction = options.friction !== undefined ? options.friction : 0.90; // Player needs friction
+        options.friction = options.friction !== undefined ? options.friction : 0.98; // Player needs friction (Reduced significantly)
         options.gravity = options.gravity !== undefined ? options.gravity : 0; // Keep gravity off for now (top-down?)
         options.maxVelocityX = options.maxVelocityX !== undefined ? options.maxVelocityX : 200;
         options.maxVelocityY = options.maxVelocityY !== undefined ? options.maxVelocityY : 200;
@@ -22,15 +22,21 @@ export class Player extends PhysicalObject {
 
         // Movement properties
         this.moveSpeed = options.moveSpeed || 3000; // Acceleration force
-        this.dashSpeed = options.dashSpeed || 600;
-        this.dashDuration = options.dashDuration || 0.15; // seconds
+        this.sprintMultiplier = options.sprintMultiplier || 1.5; // Speed multiplier for sprinting
+        this.isSprinting = false;
+        this.originalMaxVelocityX = options.maxVelocityX !== undefined ? options.maxVelocityX : 200; // Store original max speed
+        this.originalMaxVelocityY = options.maxVelocityY !== undefined ? options.maxVelocityY : 200; // Store original max speed
+
+        // Dash properties
+        this.dashSpeed = options.dashSpeed || 1200; // Target: ~300px (6 tiles)
+        this.dashDuration = options.dashDuration || 0.25; // Longer duration
         this.dashCooldown = options.dashCooldown || 0.5; // seconds
         this.isDashing = false;
         this.dashTimer = 0;
         this.dashCooldownTimer = 0;
 
         // Attack properties
-        this.attackLungeSpeed = options.attackLungeSpeed || 400;
+        this.attackLungeSpeed = options.attackLungeSpeed || 750; // Target: ~150px (3 tiles)
         this.attackDuration = options.attackDuration || 0.2;
         this.attackCooldown = options.attackCooldown || 0.4;
         this.isAttacking = false;
@@ -40,6 +46,8 @@ export class Player extends PhysicalObject {
 
         // Input
         this.inputHandler = inputHandler; // Use the shared InputHandler
+        this.lastInputDirectionX = 1; // Default facing direction
+        this.lastInputDirectionY = 0;
     }
 
     update(deltaTime, world) { // Pass world/scene context if needed for interactions
@@ -81,6 +89,15 @@ export class Player extends PhysicalObject {
             // this.velocityY = this.attackDirection.y * this.attackLungeSpeed * (this.attackTimer / this.attackDuration);
         }
 
+        // Adjust max velocity if sprinting
+        if (this.isSprinting) {
+            this.maxVelocityX = this.originalMaxVelocityX * this.sprintMultiplier;
+            this.maxVelocityY = this.originalMaxVelocityY * this.sprintMultiplier;
+        } else {
+            this.maxVelocityX = this.originalMaxVelocityX;
+            this.maxVelocityY = this.originalMaxVelocityY;
+        }
+
         // Call the original Entity update method to apply physics
         // We bypass PhysicalObject's empty update
         Entity.prototype.update.call(this, deltaTime);
@@ -90,6 +107,8 @@ export class Player extends PhysicalObject {
             this.setState('dashing');
         } else if (this.isAttacking) {
             this.setState('attacking');
+        } else if (this.isSprinting && (Math.abs(this.velocityX) > 1 || Math.abs(this.velocityY) > 1)) {
+             this.setState('sprinting');
         } else if (Math.abs(this.velocityX) > 1 || Math.abs(this.velocityY) > 1) {
             this.setState('moving');
         } else {
@@ -100,6 +119,8 @@ export class Player extends PhysicalObject {
     handleMovementInput(deltaTime) {
         let moveX = 0;
         let moveY = 0;
+        this.isSprinting = this.inputHandler.isDown('ShiftLeft') || this.inputHandler.isDown('ShiftRight');
+        const currentMoveSpeed = this.isSprinting ? this.moveSpeed * this.sprintMultiplier : this.moveSpeed;
 
         if (this.inputHandler.isDown('KeyW')) {
             moveY -= 1;
@@ -121,8 +142,14 @@ export class Player extends PhysicalObject {
             moveY /= len;
         }
 
-        this.accelerationX = moveX * this.moveSpeed;
-        this.accelerationY = moveY * this.moveSpeed;
+        // Store the last non-zero input direction
+        if (len > 0) {
+            this.lastInputDirectionX = moveX;
+            this.lastInputDirectionY = moveY;
+        }
+
+        this.accelerationX = moveX * currentMoveSpeed;
+        this.accelerationY = moveY * currentMoveSpeed;
     }
 
     handleActionInput(deltaTime, world) {
@@ -144,25 +171,23 @@ export class Player extends PhysicalObject {
         this.dashTimer = this.dashDuration;
         this.dashCooldownTimer = this.dashCooldown; // Start cooldown
 
-        // Determine dash direction (current movement or facing direction)
-        let dashDirX = this.velocityX;
-        let dashDirY = this.velocityY;
-        let len = Math.sqrt(dashDirX * dashDirX + dashDirY * dashDirY);
+        // Determine dash direction based on the last movement input
+        let dashDirX = this.lastInputDirectionX;
+        let dashDirY = this.lastInputDirectionY;
 
-        // If not moving, dash forward (assuming a facing direction property exists, or default)
-        // For now, let's dash based on last input or default right if idle
-        if (len < 1) {
-             // Check last input direction (more complex) or just default
-             dashDirX = 1; // Default dash right if idle
-             dashDirY = 0;
-             len = 1;
+        // Ensure there's a direction (shouldn't happen with default, but safety check)
+        let len = Math.sqrt(dashDirX * dashDirX + dashDirY * dashDirY);
+        if (len < 0.1) { // Use a small threshold instead of strict 0
+            dashDirX = 1; // Default right if somehow direction is zero
+            dashDirY = 0;
+            len = 1;
+        } else {
+            // Normalize if needed (lastInputDirection should already be normalized)
+            dashDirX /= len;
+            dashDirY /= len;
         }
 
-        // Normalize
-        dashDirX /= len;
-        dashDirY /= len;
-
-        // Apply dash velocity (overrides current velocity)
+        // Set velocity directly for a consistent dash impulse
         this.velocityX = dashDirX * this.dashSpeed;
         this.velocityY = dashDirY * this.dashSpeed;
 
@@ -177,21 +202,24 @@ export class Player extends PhysicalObject {
         this.attackTimer = this.attackDuration;
         this.attackCooldownTimer = this.attackCooldown; // Start cooldown
 
-        // Determine attack direction (similar to dash)
-        let attackDirX = this.velocityX;
-        let attackDirY = this.velocityY;
-        let len = Math.sqrt(attackDirX * attackDirX + attackDirY * attackDirY);
+        // Determine attack direction based on the last movement input
+        let attackDirX = this.lastInputDirectionX;
+        let attackDirY = this.lastInputDirectionY;
 
-        if (len < 1) {
-            attackDirX = 1; // Default attack right
+        // Ensure there's a direction (shouldn't happen with default, but safety check)
+        let len = Math.sqrt(attackDirX * attackDirX + attackDirY * attackDirY);
+        if (len < 0.1) { // Use a small threshold instead of strict 0
+            attackDirX = 1; // Default right if somehow direction is zero
             attackDirY = 0;
             len = 1;
+        } else {
+            // Normalize if needed (lastInputDirection should already be normalized)
+            attackDirX /= len;
+            attackDirY /= len;
         }
-        attackDirX /= len;
-        attackDirY /= len;
         this.attackDirection = { x: attackDirX, y: attackDirY }; // Store for potential hitbox use
 
-        // Apply lunge impulse (add to current velocity or set it)
+        // Set velocity directly for a consistent lunge impulse
         this.velocityX = attackDirX * this.attackLungeSpeed;
         this.velocityY = attackDirY * this.attackLungeSpeed;
 

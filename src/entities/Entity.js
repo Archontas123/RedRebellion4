@@ -161,8 +161,9 @@ class Entity {
         } else {
              if (this.state === 'moving') this.setState('idle');
              // Stop tiny movements
-             this.velocityX = 0;
-             this.velocityY = 0;
+             // Stop tiny movements (Let friction handle this now)
+             // this.velocityX = 0;
+             // this.velocityY = 0;
         }
 
         // Update animation

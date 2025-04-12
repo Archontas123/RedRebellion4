@@ -1,3 +1,5 @@
+import GameScreen from './GameScreen.js'; // Import the GameScreen scene
+
 export default class StartScreen extends Phaser.Scene {
     constructor() {
         super('StartScreen');
@@ -5,7 +7,7 @@ export default class StartScreen extends Phaser.Scene {
 
     preload() {
         // Load the background image
-        this.load.image('background', 'assets/mars-background.jpg');
+        this.load.image('background', 'assets/background.png');
     }
 
     create() {
@@ -19,7 +21,7 @@ export default class StartScreen extends Phaser.Scene {
         // --- Create the clickable Title ---
         this.titleText = this.add.text(width / 2, height / 2, 'RED REBELLION', {
             fontFamily: 'Impact, fantasy', // More impactful font
-            fontSize: '80px', // Larger size
+            fontSize: '120px', // Larger size
             color: '#ff3333',
             align: 'center',
             stroke: '#000000',
@@ -52,7 +54,11 @@ export default class StartScreen extends Phaser.Scene {
                     // Fade out and switch scene
                     this.cameras.main.fade(500, 0, 0, 0); // Fade to black
                     this.time.delayedCall(500, () => {
-                        this.scene.start('GamePlay'); // Go to GamePlay scene
+                        // Check if GameScreen is already added, if not, add it
+                        if (!this.scene.get('GameScreen')) {
+                            this.scene.add('GameScreen', GameScreen, false); // Add scene but don't auto-start
+                        }
+                        this.scene.start('GameScreen'); // Now start the GameScreen scene
                     });
                 }
             });
@@ -71,7 +77,7 @@ export default class StartScreen extends Phaser.Scene {
         // Add a subtle instruction text below the title
         this.instructionText = this.add.text(width / 2, height / 2 + 80, 'Click title to start', {
             fontFamily: 'Arial, sans-serif',
-            fontSize: '20px',
+            fontSize: '30px',
             color: '#cccccc',
             align: 'center'
         }).setOrigin(0.5);

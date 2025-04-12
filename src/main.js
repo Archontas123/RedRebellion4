@@ -1,4 +1,5 @@
 import StartScreen from './scenes/StartScene.js';
+import GameScreen from './scenes/GameScreen.js';
 
 const config = {
     type: Phaser.AUTO, // Use WebGL if available, otherwise Canvas
@@ -17,7 +18,7 @@ const config = {
         mode: Phaser.Scale.RESIZE, // Resize the game canvas to fill the container
         autoCenter: Phaser.Scale.CENTER_BOTH // Center the game canvas horizontally and vertically
     },
-    scene: [StartScreen] // Add the StartScreen to the game
+    scene: [StartScreen] // Only start with the StartScreen initially
 };
 
 const game = new Phaser.Game(config);
