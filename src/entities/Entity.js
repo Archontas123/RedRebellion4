@@ -169,7 +169,6 @@ class Entity {
             this.velocityX *= Math.pow(this.friction, deltaTime * 60); // Scale friction effect by frame rate
             this.velocityY *= Math.pow(this.friction, deltaTime * 60);
             if (Math.abs(this.velocityX) > 0.1 || Math.abs(this.velocityY) > 0.1) { // Only log if moving significantly
-                 console.log(`[Entity Update] ID: ${this.id}, After Friction Vel: (${this.velocityX.toFixed(2)}, ${this.velocityY.toFixed(2)})`); // DEBUG LOG
             }
 
             // Clamp velocity
@@ -244,23 +243,39 @@ class Entity {
         }
     }
 
-    flash(color, duration) {
-        if (this.state === 'dead') return;
+// Enhanced flash method for better visual feedback
+flash(color, duration) {
+    if (this.state === 'dead') return;
 
-        this.isFlashing = true;
-        this.flashColor = color;
-        this.flashTimer = Math.max(this.flashTimer, duration); // Extend flash if already flashing
-    }
+    this.isFlashing = true;
+    this.flashColor = color;
+    this.flashTimer = Math.max(this.flashTimer, duration); // Extend flash if already flashing
+    
+    // Enhanced flash properties
+    this.flashIntensity = 1.0; // Start at full intensity
+    this.flashDecayRate = 1.0 / duration; // Decay over the duration
+    
+    // Store original color for gradual return
+    this.originalColor = this.originalColor || null;
+}
 
-    updateFlash(deltaTime) {
-        if (this.isFlashing) {
-            this.flashTimer -= deltaTime;
-            if (this.flashTimer <= 0) {
-                this.isFlashing = false;
-                this.flashTimer = 0;
-            }
+// Update flash with decay for smoother transitions
+updateFlash(deltaTime) {
+    if (this.isFlashing) {
+        this.flashTimer -= deltaTime;
+        
+        // Update flash intensity for smooth fade out
+        if (this.flashIntensity > 0) {
+            this.flashIntensity = Math.max(0, this.flashIntensity - (this.flashDecayRate * deltaTime));
+        }
+        
+        if (this.flashTimer <= 0) {
+            this.isFlashing = false;
+            this.flashTimer = 0;
+            this.flashIntensity = 0;
         }
     }
+}
 
     // --- Collision Methods ---
     checkCollision(otherEntity, deltaTime) {
@@ -335,77 +350,117 @@ class Entity {
     }
 
     // --- Drawing ---
-    draw(context) {
-        if (this.state === 'dead' && !(this.currentAnimation && this.currentAnimation.name === 'death')) {
-             // Optionally hide if dead and no death animation playing
-             // return;
-        }
-
-        let drawn = false;
-        const bounds = this.getAbsoluteBounds(); // Get bounds once for drawing
-
-        // --- Draw Shadow ---
-        // Simple oval shadow below the entity
-        context.fillStyle = 'rgba(0, 0, 0, 0.3)'; // Semi-transparent black
-        context.beginPath();
-        context.ellipse(
-            bounds.x + bounds.width / 2,    // Center X
-            bounds.y + bounds.height,       // Bottom Y
-            bounds.width / 2 * 0.8,         // Radius X (slightly smaller than width)
-            bounds.height / 4,              // Radius Y (flattened)
-            0,                              // Rotation
-            0,                              // Start Angle
-            Math.PI * 2                     // End Angle
-        );
-        context.fill();
-        // --- End Draw Shadow ---
-
-
-        // Try drawing animation frame
-        if (this.currentAnimation && this.currentAnimation.frames && this.currentAnimation.frames.length > 0) {
-            const frame = this.currentAnimation.frames[this.currentFrame];
-            if (frame) {
-                // Assuming frame is an Image object or similar drawable
-                // Adjust drawing position if sprite origin isn't top-left
-                context.drawImage(frame, this.x, this.y, frame.width, frame.height);
-                drawn = true;
-            }
-        }
-
-        // Fallback to static sprite if no animation frame drawn
-        if (!drawn && this.sprite) {
-             context.drawImage(this.sprite, this.x, this.y, this.sprite.width, this.sprite.height);
-             drawn = true;
-        }
-
-        // Fallback to basic rectangle if no sprite/animation drawn
-        if (!drawn) {
-            context.fillStyle = 'grey'; // Fallback color
-            // const bounds = this.getAbsoluteBounds(); // Already got bounds above
-            context.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
-
-             // Draw velocity vector for debugging
-             context.strokeStyle = 'blue';
-             context.beginPath();
-             context.moveTo(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
-             context.lineTo(bounds.x + bounds.width / 2 + this.velocityX * 0.1, bounds.y + bounds.height / 2 + this.velocityY * 0.1); // Scale vector for visibility
-             context.stroke();
-        }
-
-        // Draw flash effect if active
-        if (this.isFlashing) {
-            context.save(); // Save current context state
-            context.globalAlpha = 0.75; // Increased opacity
-            context.fillStyle = this.flashColor;
-            // const bounds = this.getAbsoluteBounds(); // Already got bounds above
-            context.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
-            context.restore(); // Restore context state
-        }
-
-        // Optional: Draw collision bounds for debugging
-        // context.strokeStyle = 'lime';
-        // context.strokeRect(this.getAbsoluteBounds().x, this.getAbsoluteBounds().y, this.getAbsoluteBounds().width, this.getAbsoluteBounds().height);
+// Enhanced draw method to show improved flash and effects
+draw(context) {
+    if (this.state === 'dead' && !(this.currentAnimation && this.currentAnimation.name === 'death')) {
+        // Optionally hide if dead and no death animation playing
+        // return;
     }
+
+    let drawn = false;
+    const bounds = this.getAbsoluteBounds(); // Get bounds once for drawing
+
+    // --- Draw Enhanced Shadow ---
+    // Enhanced oval shadow below the entity
+    context.fillStyle = 'rgba(0, 0, 0, 0.3)'; // Semi-transparent black
+    context.beginPath();
+    context.ellipse(
+        bounds.x + bounds.width / 2,    // Center X
+        bounds.y + bounds.height,       // Bottom Y
+        bounds.width / 2 * 0.8,         // Radius X (slightly smaller than width)
+        bounds.height / 4,              // Radius Y (flattened)
+        0,                              // Rotation
+        0,                              // Start Angle
+        Math.PI * 2                     // End Angle
+    );
+    context.fill();
+    // --- End Draw Shadow ---
+
+
+    // Try drawing animation frame
+    if (this.currentAnimation && this.currentAnimation.frames && this.currentAnimation.frames.length > 0) {
+        const frame = this.currentAnimation.frames[this.currentFrame];
+        if (frame) {
+            // Assuming frame is an Image object or similar drawable
+            // Adjust drawing position if sprite origin isn't top-left
+            context.drawImage(frame, this.x, this.y, frame.width, frame.height);
+            drawn = true;
+        }
+    }
+
+    // Fallback to static sprite if no animation frame drawn
+    if (!drawn && this.sprite) {
+        context.drawImage(this.sprite, this.x, this.y, this.sprite.width, this.sprite.height);
+        drawn = true;
+    }
+
+    // Fallback to basic rectangle if no sprite/animation drawn
+    if (!drawn) {
+        // Special handling for stunned enemies - white with pulsing effect
+        if (this.isStunned && this.type === 'enemy') {
+            // Calculate pulsing value (0.7 to 1.0)
+            const now = Date.now() / 1000;
+            const pulseValue = 0.7 + (Math.sin(now * 8) + 1) * 0.15;
+            
+            context.fillStyle = `rgba(255, 255, 255, ${pulseValue})`;
+        } else {
+            context.fillStyle = 'grey'; // Fallback color
+        }
+        context.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+
+        // Draw velocity vector for debugging
+        context.strokeStyle = 'blue';
+        context.beginPath();
+        context.moveTo(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+        context.lineTo(bounds.x + bounds.width / 2 + this.velocityX * 0.1, bounds.y + bounds.height / 2 + this.velocityY * 0.1); // Scale vector for visibility
+        context.stroke();
+    }
+
+    // Draw enhanced flash effect if active
+    if (this.isFlashing) {
+        context.save(); // Save current context state
+        
+        // Enhanced flash effect with intensity fade
+        context.globalAlpha = 0.75 * this.flashIntensity;
+        context.fillStyle = this.flashColor;
+        context.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+        
+        // Add a subtle glow/outline during flash
+        context.globalAlpha = 0.5 * this.flashIntensity;
+        context.lineWidth = 3;
+        context.strokeStyle = this.flashColor;
+        context.strokeRect(bounds.x - 2, bounds.y - 2, bounds.width + 4, bounds.height + 4);
+        
+        context.restore(); // Restore context state
+    }
+
+    // --- Draw Stun Effect (if stunned) ---
+    if (this.isStunned) {
+        context.save();
+        
+        // Calculate positions for stars/swirls
+        const centerX = bounds.x + bounds.width / 2;
+        const topY = bounds.y - 15;
+        const currentTime = Date.now() / 1000;
+        const starCount = 3;
+        
+        // Draw stars that orbit around the entity's head
+        for (let i = 0; i < starCount; i++) {
+            const angle = currentTime * 2 + (i * Math.PI * 2 / starCount);
+            const starX = centerX + Math.cos(angle) * 12;
+            const starY = topY + Math.sin(angle) * 6;
+            
+            context.fillStyle = 'yellow';
+            
+            // Draw a simple star
+            context.beginPath();
+            context.arc(starX, starY, 3, 0, Math.PI * 2);
+            context.fill();
+        }
+        
+        context.restore();
+    }
+}
 }
 
 // Export the class if using modules (adjust based on your project setup)

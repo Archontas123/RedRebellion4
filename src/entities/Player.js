@@ -352,47 +352,70 @@ export class Player extends Entity {
         }
     }
 
-    // Handle collision with other entities
-    handleCollision(otherEntity) {
-        super.handleCollision(otherEntity);
+// Handle collision with other entities
+handleCollision(otherEntity) {
+    super.handleCollision(otherEntity);
 
-        // --- Lunge Attack Collision ---
-        if (this.isAttacking) {
-            // Use optional chaining ?. in case otherEntity is null/undefined briefly
-            console.log(`Player attacking, collided with: ${otherEntity?.id} (Type: ${otherEntity?.type})`);
-            if (otherEntity?.type === 'enemy') {
-                 console.log(`>>> Enemy collision detected during attack! Applying effects to ${otherEntity.id}`);
-                 // Ensure enemy is not already dead AND hasn't been hit by this attack yet
-                 if (otherEntity.state !== 'dead' && !this.enemiesHitThisAttack.has(otherEntity.id)) {
-                    // 1. Apply Damage
-                    otherEntity.takeDamage(this.attackPower);
-                    this.enemiesHitThisAttack.add(otherEntity.id); // Mark this enemy as hit for this attack
+    // --- Lunge Attack Collision ---
+    if (this.isAttacking) {
+        // Use optional chaining ?. in case otherEntity is null/undefined briefly
+        console.log(`Player attacking, collided with: ${otherEntity?.id} (Type: ${otherEntity?.type})`);
+        if (otherEntity?.type === 'enemy') {
+             console.log(`>>> Enemy collision detected during attack! Applying effects to ${otherEntity.id}`);
+             // Ensure enemy is not already dead AND hasn't been hit by this attack yet
+             if (otherEntity.state !== 'dead' && !this.enemiesHitThisAttack.has(otherEntity.id)) {
+                // 1. Apply Damage
+                otherEntity.takeDamage(this.attackPower);
+                this.enemiesHitThisAttack.add(otherEntity.id); // Mark this enemy as hit for this attack
 
-                    // 2. Apply Knockback
-                    const knockbackForce = 450; // Increased force significantly
-                    const knockbackDirectionX = otherEntity.x - this.x;
-                    const knockbackDirectionY = otherEntity.y - this.y;
-                    // Normalize and apply force (assuming an applyKnockback method exists)
-                    otherEntity.applyKnockback(knockbackDirectionX, knockbackDirectionY, knockbackForce);
+                // 2. Apply Enhanced Knockback
+                const knockbackForce = 600; // Increased force significantly
+                const knockbackDirectionX = otherEntity.x - this.x;
+                const knockbackDirectionY = otherEntity.y - this.y;
+                // Normalize and apply force
+                otherEntity.applyKnockback(knockbackDirectionX, knockbackDirectionY, knockbackForce);
 
-                    // 3. Apply Stun (assuming a stun method exists)
-                    const stunDuration = 0.5; // seconds
-                    otherEntity.stun(stunDuration);
+                // 3. Apply longer stun
+                const stunDuration = 0.8; // seconds - increased from 0.5
+                otherEntity.stun(stunDuration);
 
-                    // 4. Flash is handled automatically by takeDamage in Entity.js
-                 }
-            } else {
-                 console.log(`>>> Collision during attack was NOT with an enemy.`);
-            }
+                // 4. Create impact effect at the hit location
+                if (this.scene && this.scene.createImpactEffect) {
+                    this.scene.createImpactEffect(otherEntity.x, otherEntity.y);
+                }
+
+                // 5. Trigger camera shake for feedback
+                if (this.scene && this.scene.cameras && this.scene.cameras.main) {
+                    this.scene.cameras.main.shake(100, 0.01); // Duration: 100ms, Intensity: 0.01
+                }
+
+                // 6. Briefly pause time for hit-stop effect (makes hits feel weightier)
+                if (this.scene) {
+                    // Save current velocities
+                    const playerVelX = this.velocityX;
+                    const playerVelY = this.velocityY;
+                    const enemyVelX = otherEntity.velocityX;
+                    const enemyVelY = otherEntity.velocityY;
+                    
+                    // Stop all movement momentarily
+                    this.velocityX = 0;
+                    this.velocityY = 0;
+                    otherEntity.velocityX = 0;
+                    otherEntity.velocityY = 0;
+                    
+                    // Resume after brief pause with slightly reduced player velocity
+                    this.scene.time.delayedCall(80, () => {
+                        // Resume with some velocity reduction (to make hits feel impactful)
+                        this.velocityX = playerVelX * 0.7;
+                        this.velocityY = playerVelY * 0.7;
+                        
+                        // Enemy velocity is set by knockback, no need to restore
+                    });
+                }
+             }
         }
-        // --- End Lunge Attack Collision ---
-
-        // Original check (commented out while debugging with logs above)
-        // if (this.isAttacking && otherEntity.type === 'enemy') {
-        //     console.log(`Player attacked enemy ${otherEntity.id} for ${this.attackPower} damage`);
-        //     otherEntity.takeDamage(this.attackPower);
-        // }
     }
+}
 
     // Override takeDamage to implement player-specific damage handling
     takeDamage(amount) {
