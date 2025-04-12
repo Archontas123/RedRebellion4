@@ -5,74 +5,218 @@ class Enemy extends Entity {
         // Set default enemy options and merge with provided options
         const enemyOptions = {
             type: 'enemy',
-            maxHealth: options.maxHealth || 50, // Default enemy health
-            // Add other enemy-specific defaults if needed
-            ...options, // Allow overriding defaults
+            maxHealth: options.maxHealth || 50,
+            speed: options.speed || 50,
+            attackPower: options.attackPower || 10,
+            attackRadius: options.attackRadius || 30, // When to initiate attack
+            directChaseRadius: options.directChaseRadius || 150, // When to target player directly
+            attackCooldown: options.attackCooldown || 1.5,
+            staticPointOffset: options.staticPointOffset || 100, // Distance for static points from player (Reduced from 200)
+            collisionBounds: options.collisionBounds || { x: 0, y: 0, width: 50, height: 50 }, // Default to 50x50 like player
+            ...options,
         };
 
         super(x, y, enemyOptions);
 
-        // Enemy-specific properties can be added here
-        this.attackPower = options.attackPower || 10; // Example property
-        this.aiState = 'idle'; // Example: 'idle', 'patrolling', 'chasing', 'attacking'
-        this.target = null; // Reference to the player or other target
-        this.detectionRadius = options.detectionRadius || 150; // How far the enemy can "see"
-        this.attackRadius = options.attackRadius || 30; // How close to attack
+        // Enemy-specific properties
+        this.attackPower = enemyOptions.attackPower;
+        this.speed = enemyOptions.speed;
+        this.directChaseRadius = enemyOptions.directChaseRadius;
+        this.attackRadius = enemyOptions.attackRadius;
+        this.attackCooldown = enemyOptions.attackCooldown;
+        this.staticPointOffset = enemyOptions.staticPointOffset;
+        this.attackTimer = 0;
+// Pathfinding state
+this.aiState = 'idle'; // 'idle', 'approaching_static_point', 'chasing_player', 'attacking'
+this.target = null; // Reference to the player
+this.pathfindingTarget = null; // {x, y} point the enemy is moving towards
+this.currentTargetPointIndex = null; // Index (0-3) of the static point being targeted
+
+// Status effect properties
+this.isStunned = false;
+this.stunTimer = 0;
+
+        // Debug properties for visualization
+        this.debugData = {
+            directChaseRadius: this.directChaseRadius,
+            attackRadius: this.attackRadius,
+            staticPointOffset: this.staticPointOffset,
+            calculatedStaticPoints: [], // Store the 4 calculated points for debug draw
+            pathfindingTarget: null,
+            aiState: this.aiState,
+        };
+
+        // Knockback properties (optional, can be handled directly in applyKnockback)
+        // this.knockbackVelocityX = 0;
+        // this.knockbackVelocityY = 0;
+        // this.knockbackTimer = 0;
     }
 
-    // Override update to implement enemy AI and behavior
-    update(deltaTime, world) { // Pass world context if needed (e.g., for pathfinding, player reference)
-        super.update(deltaTime); // Call base class update for physics, animation
+    // Helper to calculate distance squared (more efficient than sqrt)
+    distanceSq(x1, y1, x2, y2) {
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        return dx * dx + dy * dy;
+    }
+
+    // Helper to generate random points on a circle circumference
+    generatePointOnCircle(centerX, centerY, radius) {
+        const angle = Math.random() * Math.PI * 2;
+        const x = centerX + Math.cos(angle) * radius;
+        const y = centerY + Math.sin(angle) * radius;
+        return { x, y };
+    }
+
+    // Override update to implement new enemy AI and behavior
+    update(deltaTime, world) { // Pass world context (scene, player, etc.)
+        // Call base class update FIRST. This handles stun timer, flash timer,
+        // applies friction (to knockback velocity too), gravity, and base position updates.
+        super.update(deltaTime);
 
         if (this.state === 'dead') return;
 
-        // --- Basic AI Logic ---
-        // Find potential target (e.g., the player)
-        // This requires access to the player object, often passed via 'world' or scene context
-        if (world && world.player) {
-            this.target = world.player; // Simple assignment, could be more complex logic
-        } else {
-            this.target = null; // No target found
+        // Log velocity *after* super.update() and *before* AI logic
+        if (Math.abs(this.velocityX) > 0.1 || Math.abs(this.velocityY) > 0.1 || this.isStunned) { // Log if moving or stunned
+             console.log(`[Enemy Update Start] ID: ${this.id}, Stunned: ${this.isStunned}, Vel Before AI: (${this.velocityX.toFixed(2)}, ${this.velocityY.toFixed(2)})`); // DEBUG LOG
         }
 
-        if (this.target && this.target.state !== 'dead') {
-            const dx = this.target.x - this.x;
-            const dy = this.target.y - this.y;
-            const distance = Math.sqrt(dx * dx + dy * dy);
+        // --- AI and Enemy-Specific Logic ---
+        // Only run AI if NOT stunned. The base update already handles physics for stunned state.
+        if (!this.isStunned) {
+            // Update attack timer
+        if (this.attackTimer > 0) {
+            this.attackTimer -= deltaTime;
+        }
 
-            if (distance <= this.attackRadius) {
-                this.aiState = 'attacking';
-                // TODO: Implement attack logic (e.g., trigger attack animation, deal damage)
-                this.velocityX = 0; // Stop moving when attacking
-                this.velocityY = 0;
-                this.setState('attacking'); // Use Entity state for animation
-                // console.log(`${this.id} attacking ${this.target.id}`);
+        // --- Simplified AI Logic ---
+        this.target = world.player; // Always target the player context
 
-            } else if (distance <= this.detectionRadius) {
-                this.aiState = 'chasing';
-                // Move towards the target
-                const angle = Math.atan2(dy, dx);
-                const chaseSpeed = 50; // Adjust speed as needed
-                this.velocityX = Math.cos(angle) * chaseSpeed;
-                this.velocityY = Math.sin(angle) * chaseSpeed;
-                this.setState('moving'); // Use Entity state for animation
-                // console.log(`${this.id} chasing ${this.target.id}`);
+        if (!this.target || this.target.state === 'dead') {
+            // No target or target is dead, go idle
+            this.aiState = 'idle';
+            this.velocityX = 0;
+            this.velocityY = 0;
+            this.pathfindingTarget = null;
+            this.currentTargetPointIndex = null;
+            if (this.state !== 'idle') this.setState('idle');
+            this.debugData.aiState = this.aiState;
+            this.debugData.pathfindingTarget = null;
+            this.debugData.calculatedStaticPoints = [];
+            return; // Stop processing AI
+        }
 
-            } else {
-                this.aiState = 'idle'; // Target out of range
-                // TODO: Implement idle behavior (e.g., patrolling, standing still)
-                this.velocityX = 0; // Stop if idle
-                this.velocityY = 0;
-                 if (this.state !== 'idle') this.setState('idle'); // Use Entity state for animation
+        const playerX = this.target.x;
+        const playerY = this.target.y;
+        const distanceToPlayerSq = this.distanceSq(this.x, this.y, playerX, playerY);
+        const directChaseRadiusSq = this.directChaseRadius * this.directChaseRadius;
+        const attackRadiusSq = this.attackRadius * this.attackRadius;
+
+        // Calculate the 4 static points relative to the player
+        const offset = this.staticPointOffset;
+        const staticPoints = [
+            { x: playerX, y: playerY - offset }, // North
+            { x: playerX + offset, y: playerY }, // East
+            { x: playerX, y: playerY + offset }, // South
+            { x: playerX - offset, y: playerY }  // West
+        ];
+        this.debugData.calculatedStaticPoints = staticPoints.map(p => ({...p})); // Update debug data
+
+        // --- State Transitions ---
+
+        // 1. Attacking State
+        if (distanceToPlayerSq <= attackRadiusSq) {
+            this.aiState = 'attacking';
+            this.velocityX = 0;
+            this.velocityY = 0;
+            this.pathfindingTarget = null;
+            this.currentTargetPointIndex = null; // No static point target when attacking
+            this.setState('attacking'); // Or 'idle'
+
+            if (this.attackTimer <= 0) {
+                this.attack(this.target);
+                this.attackTimer = this.attackCooldown;
             }
+
+        // 2. Direct Chase State
+        } else if (distanceToPlayerSq <= directChaseRadiusSq) {
+            this.aiState = 'chasing_player';
+            this.pathfindingTarget = { x: playerX, y: playerY };
+            this.currentTargetPointIndex = null; // No static point target when chasing
+            this.setState('moving');
+
+        // 3. Approaching Static Point State
         } else {
-            this.aiState = 'idle'; // No target or target is dead
-             this.velocityX = 0;
-             this.velocityY = 0;
-             if (this.state !== 'idle') this.setState('idle');
+            this.aiState = 'approaching_static_point';
+            this.setState('moving');
+
+            // Select a static point if none is currently targeted
+            if (this.currentTargetPointIndex === null) {
+                this.currentTargetPointIndex = Math.floor(Math.random() * 4);
+                this.pathfindingTarget = { ...staticPoints[this.currentTargetPointIndex] };
+            } else {
+                 // Update the target position in case the player moved
+                 this.pathfindingTarget = { ...staticPoints[this.currentTargetPointIndex] };
+            }
+
+            // Check if close enough to the current static point target
+            if (this.pathfindingTarget) {
+                const distToStaticTargetSq = this.distanceSq(this.x, this.y, this.pathfindingTarget.x, this.pathfindingTarget.y);
+                const targetReachedThresholdSq = 20 * 20; // 20 pixels threshold
+
+                if (distToStaticTargetSq < targetReachedThresholdSq) {
+                    // Reached the point, select a *different* random point
+                    let newIndex;
+                    do {
+                        newIndex = Math.floor(Math.random() * 4);
+                    } while (newIndex === this.currentTargetPointIndex);
+                    this.currentTargetPointIndex = newIndex;
+                    this.pathfindingTarget = { ...staticPoints[this.currentTargetPointIndex] };
+                }
+            }
         }
 
-        // --- End Basic AI Logic ---
+        // --- Movement Logic ---
+        if (this.aiState === 'approaching_static_point' || this.aiState === 'chasing_player') {
+            if (this.pathfindingTarget) {
+                const targetX = this.pathfindingTarget.x;
+                const targetY = this.pathfindingTarget.y;
+                const dx = targetX - this.x;
+                const dy = targetY - this.y;
+
+                // Avoid division by zero if already at target
+                if (dx !== 0 || dy !== 0) {
+                    const angle = Math.atan2(dy, dx);
+                    const newVelX = Math.cos(angle) * this.speed;
+                    const newVelY = Math.sin(angle) * this.speed;
+                    if (this.velocityX !== newVelX || this.velocityY !== newVelY) { // Log only if AI changes velocity
+                         console.log(`[Enemy AI Sets Vel] ID: ${this.id}, State: ${this.aiState}, New Vel: (${newVelX.toFixed(2)}, ${newVelY.toFixed(2)})`); // DEBUG LOG
+                    }
+                    this.velocityX = newVelX;
+                    this.velocityY = newVelY;
+                } else {
+                    if (this.velocityX !== 0 || this.velocityY !== 0) { // Log only if AI changes velocity
+                         console.log(`[Enemy AI Sets Vel] ID: ${this.id}, State: ${this.aiState}, At Target, Setting Vel to 0`); // DEBUG LOG
+                    }
+                    this.velocityX = 0;
+                    this.velocityY = 0;
+                }
+                this.setState('moving');
+            } else {
+                // Should have a target in these states, but stop if not
+                if (this.velocityX !== 0 || this.velocityY !== 0) { // Log only if AI changes velocity
+                     console.log(`[Enemy AI Sets Vel] ID: ${this.id}, State: ${this.aiState}, No Target, Setting Vel to 0`); // DEBUG LOG
+                }
+                this.velocityX = 0;
+                this.velocityY = 0;
+            }
+        }
+
+        // Update debug data
+        this.debugData.aiState = this.aiState;
+        this.debugData.pathfindingTarget = this.pathfindingTarget ? { ...this.pathfindingTarget } : null;
+
+        // --- End Simplified AI Logic ---
+        } // End of if (!this.isStunned) block
     }
 
     // Override handleCollision for enemy-specific interactions
@@ -121,11 +265,123 @@ class Enemy extends Entity {
 
     // Example: Specific attack method
     attack(target) {
-        if (this.state !== 'dead' && target && target.takeDamage) {
+        // Ensure we are in the correct state and the target is valid
+        if (this.state !== 'dead' && this.aiState === 'attacking' && target && target.takeDamage && target.state !== 'dead') {
             console.log(`Enemy ${this.id} attacks ${target.id} for ${this.attackPower} damage.`);
             target.takeDamage(this.attackPower);
-            // Trigger attack animation, cooldown, etc.
-            this.setAnimation('attack'); // Assuming an 'attack' animation exists
+
+            // TODO: Trigger specific attack animation here if available
+            // this.setAnimation('attack'); // Example
+
+            // Cooldown is reset in the update loop after calling attack
+        }
+    }
+
+    // Method to apply knockback force
+    applyKnockback(directionX, directionY, force) {
+        if (this.state === 'dead') return;
+
+        // Normalize the direction vector
+        const length = Math.sqrt(directionX * directionX + directionY * directionY);
+        let normalizedX = 0;
+        let normalizedY = 0;
+
+        if (length > 0) {
+            normalizedX = directionX / length;
+            normalizedY = directionY / length;
+        } else {
+            // If direction is zero (e.g., player exactly on top), apply a default knockback
+            // Choose a random direction or a default like straight up
+            normalizedX = 0;
+            normalizedY = -1; // Knockback upwards
+        }
+
+        // Apply the force as an immediate velocity change
+        // The base Entity's friction should handle slowing down
+        this.velocityX += normalizedX * force;
+        this.velocityY += normalizedY * force;
+
+        // Optional: Could implement a knockback timer/state if friction isn't enough
+        // console.log(`Applied knockback to ${this.id}. New velocity: (${this.velocityX.toFixed(2)}, ${this.velocityY.toFixed(2)})`);
+    }
+
+    // Method to apply stun effect
+    stun(duration) {
+        if (this.state === 'dead') return;
+
+        this.isStunned = true;
+        this.stunTimer = Math.max(this.stunTimer, duration); // Prevent overriding a longer stun
+        this.velocityX = 0; // Stop movement when stunned
+        this.velocityY = 0;
+        this.aiState = 'idle'; // Reset AI state during stun
+        this.setState('idle'); // Or a specific 'stunned' state if animation exists
+        console.log(`Enemy ${this.id} stunned for ${duration} seconds.`);
+    }
+
+    // Method to draw debug visuals
+    // Method to draw debug visuals
+    drawDebug(graphics) {
+        // Ensure graphics object is valid
+        if (!graphics) {
+            console.warn("drawDebug called without graphics object for Enemy:", this.id);
+            return;
+        }
+        // Don't draw if dead
+        if (this.state === 'dead') return;
+
+        // Use the debugData object for consistency
+        const debugInfo = this.debugData;
+        const player = this.target; // Assumes target is the player
+
+        // --- Draw Radii ---
+        if (player && player.state !== 'dead') {
+            const playerX = player.x;
+            const playerY = player.y;
+
+            // Draw Direct Chase Radius around Player
+            graphics.lineStyle(1, 0xffff00, 0.5); // Yellow for direct chase radius
+            graphics.strokeCircle(playerX, playerY, debugInfo.directChaseRadius);
+        }
+
+        // Draw Attack Radius around Enemy
+        graphics.lineStyle(1, 0x00ff00, 0.5); // Green for attack radius
+        graphics.strokeCircle(this.x, this.y, debugInfo.attackRadius);
+
+        // --- Draw Calculated Static Points ---
+        graphics.fillStyle(0x00aaff, 0.7); // Light blue for the 4 static points
+        if (debugInfo.calculatedStaticPoints && debugInfo.calculatedStaticPoints.length > 0) {
+            debugInfo.calculatedStaticPoints.forEach((point, index) => {
+                if (point && typeof point.x === 'number' && typeof point.y === 'number') {
+                    // Highlight the current target point
+                    if (this.aiState === 'approaching_static_point' && index === this.currentTargetPointIndex) {
+                         graphics.fillStyle(0xff00ff, 0.9); // Magenta if it's the current target
+                         graphics.fillCircle(point.x, point.y, 5);
+                         graphics.fillStyle(0x00aaff, 0.7); // Reset color for others
+                    } else {
+                         graphics.fillCircle(point.x, point.y, 4); // Small circles for points
+                    }
+                }
+            });
+        }
+
+        // --- Draw Current Pathfinding Target Line ---
+        if (!this.isStunned && this.pathfindingTarget && typeof this.pathfindingTarget.x === 'number' && typeof this.pathfindingTarget.y === 'number') {
+            // Draw line from enemy to current target (either player or static point)
+            graphics.lineStyle(1, 0xff00ff, 0.8); // Magenta line
+            graphics.beginPath();
+            graphics.moveTo(this.x, this.y);
+            graphics.lineTo(this.pathfindingTarget.x, this.pathfindingTarget.y);
+            graphics.strokePath();
+
+            // Optionally draw the target point itself again on top
+            graphics.fillStyle(0xff00ff, 1.0); // Magenta for the current target point
+            graphics.fillCircle(this.pathfindingTarget.x, this.pathfindingTarget.y, 3);
+        }
+
+        // --- Draw Stun Indicator ---
+        if (this.isStunned) {
+            graphics.fillStyle(0xffff00, 0.8); // Yellow for stun
+            graphics.fillCircle(this.x, this.y - this.height / 2 - 10, 5); // Draw a small circle above the enemy
         }
     }
 }

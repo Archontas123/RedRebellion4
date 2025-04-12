@@ -1,329 +1,429 @@
-import { PhysicalObject } from './PhysicalObject.js';
-import { InputHandler } from './InputHandler.js';
-import { Entity } from './Entity.js'; // Need this to call the base update
+// src/entities/Player.js
+import { Entity } from './Entity.js';
 
-export class Player extends PhysicalObject {
+export class Player extends Entity {
     constructor(x, y, inputHandler, options = {}) {
-        // Player specific defaults
-        options.type = 'player';
-        options.friction = options.friction !== undefined ? options.friction : 0.98; // Player needs friction (Reduced significantly)
-        options.gravity = options.gravity !== undefined ? options.gravity : 0; // Keep gravity off for now (top-down?)
-        options.maxVelocityX = options.maxVelocityX !== undefined ? options.maxVelocityX : 200;
-        options.maxVelocityY = options.maxVelocityY !== undefined ? options.maxVelocityY : 200;
-        options.maxHealth = options.maxHealth || 100; // Give player health
-        options.collisionBounds = options.collisionBounds || { x: 0, y: 0, width: 16, height: 16 }; // Example size
+        // Default player options
+        const playerOptions = {
+            type: 'player',
+            maxHealth: options.maxHealth || 100,
+            friction: options.friction || 0.85, // Slightly higher friction for more responsive controls
+            ...options,
+        };
 
-        // Call PhysicalObject constructor, which calls Entity constructor
-        super(x, y, options);
+        super(x, y, playerOptions);
 
-        // Re-enable physics properties potentially deleted by PhysicalObject
-        this.health = options.health || this.maxHealth;
-        this.state = 'idle'; // Start idle
+        // Input handling
+        this.inputHandler = inputHandler;
 
         // Movement properties
-        this.moveSpeed = options.moveSpeed || 3000; // Acceleration force
-        this.sprintMultiplier = options.sprintMultiplier || 1.5; // Speed multiplier for sprinting
-        this.isSprinting = false;
-        this.originalMaxVelocityX = options.maxVelocityX !== undefined ? options.maxVelocityX : 200; // Store original max speed
-        this.originalMaxVelocityY = options.maxVelocityY !== undefined ? options.maxVelocityY : 200; // Store original max speed
+        this.moveSpeed = options.moveSpeed || 200;
+        this.isMoving = false;
+        this.direction = { x: 0, y: 1 }; // Default facing down
+        this.lastMoveDirection = { x: 0, y: 1 }; // Track last movement direction for dash
 
         // Dash properties
-        this.dashSpeed = options.dashSpeed || 1200; // Target: ~300px (6 tiles)
-        this.dashDuration = options.dashDuration || 0.25; // Longer duration
-        this.dashCooldown = options.dashCooldown || 0.5; // seconds
-        this.isDashing = false;
+        this.dashSpeed = this.moveSpeed * 6; // Much faster than normal movement (increased from 4x)
+        this.dashDistance = 10 * (options.tileSize || 50); // 10 tiles (increased from 6)
+        this.dashDuration = 0.3; // in seconds (slightly increased)
+        this.dashCooldown = 1.5; // in seconds (increased cooldown to balance the stronger dash)
         this.dashTimer = 0;
         this.dashCooldownTimer = 0;
+        this.isDashing = false;
+        this.dashDirection = { x: 0, y: 0 };
+        this.dashDistanceTraveled = 0;
 
         // Attack properties
-        this.attackLungeSpeed = options.attackLungeSpeed || 750; // Target: ~150px (3 tiles)
-        this.attackDuration = options.attackDuration || 0.2;
-        this.attackCooldown = options.attackCooldown || 0.4;
-        this.isAttacking = false;
-        this.attackTimer = 0;
+        this.attackPower = options.attackPower || 15; // Reduced from 25 for testing effects
+        this.lungeSpeed = this.moveSpeed * 3; // Slightly slower than dash
+        this.lungeDistance = 3 * (options.tileSize || 50); // 3 tiles
+        this.lungeDuration = 0.2; // in seconds
+        this.attackCooldown = 0.5; // in seconds
+        this.lungeTimer = 0;
         this.attackCooldownTimer = 0;
-        this.attackDirection = { x: 0, y: 0 }; // Direction of the last attack
+        this.isAttacking = false;
+        this.lungeDirection = { x: 0, y: 0 };
+        this.enemiesHitThisAttack = new Set(); // Keep track of enemies hit during the current attack
+        this.lungeDistanceTraveled = 0;
 
-        // Input
-        this.inputHandler = inputHandler; // Use the shared InputHandler
-        this.lastInputDirectionX = 1; // Default facing direction
-        this.lastInputDirectionY = 0;
+        // Mouse position for aiming
+        this.mouseX = 0;
+        this.mouseY = 0;
+        this.isMouseDown = false; // Track mouse button state
+        
+        // Setup mouse tracking
+        window.addEventListener('mousemove', this.onMouseMove.bind(this));
+        window.addEventListener('mousedown', this.onMouseDown.bind(this));
+        window.addEventListener('mouseup', this.onMouseUp.bind(this));
     }
 
-    update(deltaTime, world) { // Pass world/scene context if needed for interactions
-        if (this.state === 'dead') {
-            Entity.prototype.updateAnimation.call(this, deltaTime); // Still update animation if dead
-            return;
+    onMouseMove(event) {
+        // Update mouse position for aiming
+        this.mouseX = event.clientX;
+        this.mouseY = event.clientY;
+    }
+    
+    onMouseDown(event) {
+        // Check if it's the left mouse button (button 0)
+        if (event.button === 0) {
+            this.isMouseDown = true;
+        }
+    }
+    
+    onMouseUp(event) {
+        // Check if it's the left mouse button (button 0)
+        if (event.button === 0) {
+            this.isMouseDown = false;
+        }
+    }
+
+    onMouseMove(event) {
+        // Update mouse position for aiming
+        this.mouseX = event.clientX;
+        this.mouseY = event.clientY;
+    }
+
+    // Calculate direction to mouse cursor (in screen space)
+    updateAimDirection(scene) {
+        if (!scene || !scene.cameras || !scene.cameras.main) return;
+
+        // Get camera object
+        const camera = scene.cameras.main;
+        
+        // Manual calculation of world to screen conversion using Phaser's camera properties
+        // This is how Phaser internally converts world coordinates to screen coordinates
+        const screenX = (this.x - camera.scrollX) * camera.zoom;
+        const screenY = (this.y - camera.scrollY) * camera.zoom;
+        
+        // Get direction from player to mouse
+        const dx = this.mouseX - screenX;
+        const dy = this.mouseY - screenY;
+        
+        // Normalize direction vector
+        const length = Math.sqrt(dx * dx + dy * dy);
+        if (length > 0) {
+            this.direction = {
+                x: dx / length,
+                y: dy / length
+            };
+        }
+    }
+
+    update(deltaTime, scene) {
+        this.scene = scene; // Store the scene reference
+        if (this.state === 'dead') return;
+
+        // Reset velocity before processing inputs and states
+        this.velocityX = 0;
+        this.velocityY = 0;
+
+        // Update aim direction based on mouse position
+        this.updateAimDirection(scene);
+
+        // Handle cooldown timers
+        if (this.dashCooldownTimer > 0) {
+            this.dashCooldownTimer -= deltaTime;
+        }
+        
+        if (this.attackCooldownTimer > 0) {
+            this.attackCooldownTimer -= deltaTime;
         }
 
-        // Update timers
-        this.dashTimer = Math.max(0, this.dashTimer - deltaTime);
-        this.dashCooldownTimer = Math.max(0, this.dashCooldownTimer - deltaTime);
-        this.attackTimer = Math.max(0, this.attackTimer - deltaTime);
-        this.attackCooldownTimer = Math.max(0, this.attackCooldownTimer - deltaTime);
-
-        // Reset state flags
-        if (this.isDashing && this.dashTimer <= 0) {
-            this.isDashing = false;
-            // Reset velocity after dash? Optional.
-            // this.velocityX = 0;
-            // this.velocityY = 0;
-        }
-        if (this.isAttacking && this.attackTimer <= 0) {
-            this.isAttacking = false;
-        }
-
-        // Reset acceleration before processing input
-        this.accelerationX = 0;
-        this.accelerationY = 0;
-
-        // Handle Input only if not dashing or attacking (interruptible?)
-        if (!this.isDashing && !this.isAttacking) {
-            this.handleMovementInput(deltaTime);
-            this.handleActionInput(deltaTime, world);
-        } else if (this.isAttacking) {
-            // Continue lunge momentum (or apply friction)
-            // For simplicity, let friction handle slowdown after initial impulse
-            // Or explicitly manage velocity during attack:
-            // this.velocityX = this.attackDirection.x * this.attackLungeSpeed * (this.attackTimer / this.attackDuration);
-            // this.velocityY = this.attackDirection.y * this.attackLungeSpeed * (this.attackTimer / this.attackDuration);
-        }
-
-        // Adjust max velocity if sprinting
-        if (this.isSprinting) {
-            this.maxVelocityX = this.originalMaxVelocityX * this.sprintMultiplier;
-            this.maxVelocityY = this.originalMaxVelocityY * this.sprintMultiplier;
-        } else {
-            this.maxVelocityX = this.originalMaxVelocityX;
-            this.maxVelocityY = this.originalMaxVelocityY;
-        }
-
-        // Call the original Entity update method to apply physics
-        // We bypass PhysicalObject's empty update
-        Entity.prototype.update.call(this, deltaTime);
-
-        // Update state based on actions/movement (override Entity's basic state logic)
+        // Process dashing state
         if (this.isDashing) {
-            this.setState('dashing');
-        } else if (this.isAttacking) {
-            this.setState('attacking');
-        } else if (this.isSprinting && (Math.abs(this.velocityX) > 1 || Math.abs(this.velocityY) > 1)) {
-             this.setState('sprinting');
-        } else if (Math.abs(this.velocityX) > 1 || Math.abs(this.velocityY) > 1) {
+            this.updateDash(deltaTime);
+        } 
+        // Process attacking state
+        else if (this.isAttacking) {
+            this.updateAttack(deltaTime);
+        } 
+        // Process normal movement
+        else {
+            this.processInput();
+        }
+
+        // Call parent update for physics, animation updates, etc.
+        super.update(deltaTime);
+    }
+
+    processInput() {
+        // Only process movement input if not dashing or attacking
+        if (this.isDashing || this.isAttacking) return;
+
+        let moveX = 0;
+        let moveY = 0;
+
+        // WASD movement
+        if (this.inputHandler.isDown('KeyW')) moveY -= 1;
+        if (this.inputHandler.isDown('KeyS')) moveY += 1;
+        if (this.inputHandler.isDown('KeyA')) moveX -= 1;
+        if (this.inputHandler.isDown('KeyD')) moveX += 1;
+
+        // Normalize diagonal movement
+        if (moveX !== 0 && moveY !== 0) {
+            const length = Math.sqrt(moveX * moveX + moveY * moveY);
+            moveX /= length;
+            moveY /= length;
+        }
+
+        // Apply movement speed
+        this.velocityX = moveX * this.moveSpeed;
+        this.velocityY = moveY * this.moveSpeed;
+
+        // Update movement state
+        this.isMoving = moveX !== 0 || moveY !== 0;
+        
+        // Track last movement direction for dash
+        if (this.isMoving) {
+            this.lastMoveDirection = {
+                x: moveX,
+                y: moveY
+            };
             this.setState('moving');
         } else {
             this.setState('idle');
         }
-    }
 
-    handleMovementInput(deltaTime) {
-        let moveX = 0;
-        let moveY = 0;
-        this.isSprinting = this.inputHandler.isDown('ShiftLeft') || this.inputHandler.isDown('ShiftRight');
-        const currentMoveSpeed = this.isSprinting ? this.moveSpeed * this.sprintMultiplier : this.moveSpeed;
-
-        if (this.inputHandler.isDown('KeyW')) {
-            moveY -= 1;
-        }
-        if (this.inputHandler.isDown('KeyS')) {
-            moveY += 1;
-        }
-        if (this.inputHandler.isDown('KeyA')) {
-            moveX -= 1;
-        }
-        if (this.inputHandler.isDown('KeyD')) {
-            moveX += 1;
-        }
-
-        // Normalize diagonal movement
-        const len = Math.sqrt(moveX * moveX + moveY * moveY);
-        if (len > 0) {
-            moveX /= len;
-            moveY /= len;
-        }
-
-        // Store the last non-zero input direction
-        if (len > 0) {
-            this.lastInputDirectionX = moveX;
-            this.lastInputDirectionY = moveY;
-        }
-
-        this.accelerationX = moveX * currentMoveSpeed;
-        this.accelerationY = moveY * currentMoveSpeed;
-    }
-
-    handleActionInput(deltaTime, world) {
-        // Dash
+        // Dash with Space
         if (this.inputHandler.wasPressed('Space') && this.dashCooldownTimer <= 0) {
             this.startDash();
         }
 
-        // Attack
-        if (this.inputHandler.wasPressed('KeyQ') && this.attackCooldownTimer <= 0) {
-            this.startLungeAttack(world);
+        // Check for mouse click attack
+        if (this.isMouseDown && this.attackCooldownTimer <= 0 && !this.isAttacking) {
+            this.startAttack();
+            // Reset mouse down to prevent multiple attacks from a single click
+            this.isMouseDown = false;
         }
     }
 
     startDash() {
-        if (this.dashCooldownTimer > 0 || this.isDashing) return;
-
         this.isDashing = true;
-        this.dashTimer = this.dashDuration;
-        this.dashCooldownTimer = this.dashCooldown; // Start cooldown
-
-        // Determine dash direction based on the last movement input
-        let dashDirX = this.lastInputDirectionX;
-        let dashDirY = this.lastInputDirectionY;
-
-        // Ensure there's a direction (shouldn't happen with default, but safety check)
-        let len = Math.sqrt(dashDirX * dashDirX + dashDirY * dashDirY);
-        if (len < 0.1) { // Use a small threshold instead of strict 0
-            dashDirX = 1; // Default right if somehow direction is zero
-            dashDirY = 0;
-            len = 1;
-        } else {
-            // Normalize if needed (lastInputDirection should already be normalized)
-            dashDirX /= len;
-            dashDirY /= len;
-        }
-
-        // Set velocity directly for a consistent dash impulse
-        this.velocityX = dashDirX * this.dashSpeed;
-        this.velocityY = dashDirY * this.dashSpeed;
-
-        // Make player temporarily invulnerable or pass through enemies? (optional)
-        console.log("Player dashed!");
+        this.dashTimer = 0;
+        this.dashDistanceTraveled = 0;
+        
+        // Use the last movement direction for dash
+        this.dashDirection = { ...this.lastMoveDirection };
+        
+        this.setState('dashing');
     }
 
-    startLungeAttack(world) {
-        if (this.attackCooldownTimer > 0 || this.isAttacking) return;
+    updateDash(deltaTime) {
+        this.dashTimer += deltaTime;
+        
+        // Apply dash velocity
+        this.velocityX = this.dashDirection.x * this.dashSpeed;
+        this.velocityY = this.dashDirection.y * this.dashSpeed;
+        
+        // Track distance traveled
+        const distanceThisFrame = Math.sqrt(
+            (this.velocityX * deltaTime) ** 2 + 
+            (this.velocityY * deltaTime) ** 2
+        );
+        this.dashDistanceTraveled += distanceThisFrame;
+        
+        // Create a trail effect during dash (optional visual enhancement)
+        this.createDashTrail();
+        
+        // End dash when either timer expires or distance is reached
+        if (this.dashTimer >= this.dashDuration || this.dashDistanceTraveled >= this.dashDistance) {
+            this.isDashing = false;
+            this.dashCooldownTimer = this.dashCooldown;
+            this.setState('idle');
+        }
+    }
+    
+    // Create a visual dash trail effect (stub - implement in actual game scene)
+    createDashTrail() {
+        // This would be implemented with the game's rendering system
+        // For example, in Phaser you might create particles or sprites
+        // This is just a placeholder for the concept
+        if (this.scene && this.scene.createDashTrailEffect) {
+            this.scene.createDashTrailEffect(this.x, this.y);
+        }
+    }
 
+    startAttack() {
         this.isAttacking = true;
-        this.attackTimer = this.attackDuration;
-        this.attackCooldownTimer = this.attackCooldown; // Start cooldown
-
-        // Determine attack direction based on the last movement input
-        let attackDirX = this.lastInputDirectionX;
-        let attackDirY = this.lastInputDirectionY;
-
-        // Ensure there's a direction (shouldn't happen with default, but safety check)
-        let len = Math.sqrt(attackDirX * attackDirX + attackDirY * attackDirY);
-        if (len < 0.1) { // Use a small threshold instead of strict 0
-            attackDirX = 1; // Default right if somehow direction is zero
-            attackDirY = 0;
-            len = 1;
+        this.enemiesHitThisAttack.clear(); // Clear the set at the start of each attack
+        this.lungeTimer = 0;
+        this.lungeDistanceTraveled = 0;
+        
+        // Find nearest enemy and lunge toward it, or use last movement direction if no enemy is found
+        const nearestEnemy = this.findNearestEnemy();
+        
+        if (nearestEnemy) {
+            // Calculate direction to the nearest enemy
+            const dx = nearestEnemy.x - this.x;
+            const dy = nearestEnemy.y - this.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            
+            // Normalize the direction vector
+            if (distance > 0) {
+                this.lungeDirection = {
+                    x: dx / distance,
+                    y: dy / distance
+                };
+            } else {
+                // In the unlikely case the enemy is exactly at our position, use last movement
+                this.lungeDirection = { ...this.lastMoveDirection };
+            }
         } else {
-            // Normalize if needed (lastInputDirection should already be normalized)
-            attackDirX /= len;
-            attackDirY /= len;
+            // No enemy found, use last movement direction
+            this.lungeDirection = { ...this.lastMoveDirection };
         }
-        this.attackDirection = { x: attackDirX, y: attackDirY }; // Store for potential hitbox use
-
-        // Set velocity directly for a consistent lunge impulse
-        this.velocityX = attackDirX * this.attackLungeSpeed;
-        this.velocityY = attackDirY * this.attackLungeSpeed;
-
-        console.log("Player lunged!");
-
-        // --- Attack Hit Detection ---
-        // Define hitbox relative to player and attack direction
-        const hitboxWidth = 20;
-        const hitboxHeight = 20;
-        const hitboxOffsetX = this.collisionBounds.width / 2 + (attackDirX * hitboxWidth / 2); // Offset in attack direction
-        const hitboxOffsetY = this.collisionBounds.height / 2 + (attackDirY * hitboxHeight / 2);
-
-        const attackBounds = {
-            x: this.x + hitboxOffsetX - hitboxWidth / 2,
-            y: this.y + hitboxOffsetY - hitboxHeight / 2,
-            width: hitboxWidth,
-            height: hitboxHeight
-        };
-
-        // Debug draw hitbox (implement in draw method)
-        this._debugAttackBounds = attackBounds; // Store for drawing
-
-        // Check for collisions with other entities in the world
-        if (world && world.entities) {
-            world.entities.forEach(entity => {
-                if (entity !== this && entity.takeDamage) { // Check if entity can take damage
-                    const entityBounds = entity.getAbsoluteBounds();
-                    if (this.checkAABBOverlap(attackBounds, entityBounds)) {
-                        console.log(`Player attack hit ${entity.type} ${entity.id}`);
-                        entity.takeDamage(10); // Example damage
-
-                        // Apply knockback
-                        if (entity.applyForce) {
-                            const knockbackStrength = 250;
-                            entity.applyForce(attackDirX * knockbackStrength, attackDirY * knockbackStrength);
-                        } else {
-                             // Basic knockback if no applyForce method
-                             entity.velocityX = attackDirX * 150;
-                             entity.velocityY = attackDirY * 150;
-                        }
-                    }
+        
+        this.setState('attacking');
+    }
+    
+    // Helper method to find the nearest enemy
+    findNearestEnemy() {
+        console.log("[findNearestEnemy] Searching for enemies..."); // DEBUG LOG
+        if (!this.scene) {
+            console.log("[findNearestEnemy] No scene reference found."); // DEBUG LOG
+            return null;
+        }
+        
+        // The maximum detection range for enemies
+        const detectionRange = 300; // Adjust as needed
+        let nearestEnemy = null;
+        let nearestDistance = detectionRange;
+        
+        // Check if the scene has a list of enemies to search through
+        if (this.scene.enemies && Array.isArray(this.scene.enemies)) {
+            console.log(`[findNearestEnemy] Found ${this.scene.enemies.length} enemies in scene list.`); // DEBUG LOG
+            for (const enemy of this.scene.enemies) {
+                // Skip dead enemies
+                if (enemy.state === 'dead') continue;
+                
+                // Calculate distance to this enemy
+                const dx = enemy.x - this.x;
+                const dy = enemy.y - this.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                // If this enemy is closer than the current nearest, update
+                if (distance < nearestDistance) {
+                    nearestDistance = distance;
+                    nearestEnemy = enemy;
                 }
-            });
-        }
-    }
-
-    // Helper for simple AABB overlap check
-    checkAABBOverlap(boundsA, boundsB) {
-        return boundsA.x < boundsB.x + boundsB.width &&
-               boundsA.x + boundsA.width > boundsB.x &&
-               boundsA.y < boundsB.y + boundsB.height &&
-               boundsA.y + boundsA.height > boundsB.y;
-    }
-
-     // Override draw to add debug info if needed
-     draw(context) {
-        // Call the Entity draw method first
-        Entity.prototype.draw.call(this, context);
-
-        // Debug draw attack hitbox
-        if (this.isAttacking && this._debugAttackBounds) {
-            context.strokeStyle = 'red';
-            context.lineWidth = 1;
-            context.strokeRect(
-                this._debugAttackBounds.x,
-                this._debugAttackBounds.y,
-                this._debugAttackBounds.width,
-                this._debugAttackBounds.height
-            );
-        }
-         // Reset debug bounds after drawing
-         if (!this.isAttacking) {
-             this._debugAttackBounds = null;
-         }
-    }
-
-    // Override handleCollision for player-specific interactions
-    handleCollision(otherEntity) {
-        // Example: Stop movement if hitting a solid object
-        if (otherEntity.type === 'physical_object' || otherEntity.type === 'wall') {
-             // More complex resolution needed here, this is just a basic stop
-             // Ideally, resolve collision based on penetration depth and direction
-             // For now, just log it. The physics update in Entity doesn't have resolution yet.
-             console.log(`Player collided with solid object ${otherEntity.id}`);
-             // A proper physics engine would handle separation here.
-             // Simple approach: Move back slightly? Risky.
-             // this.x -= this.velocityX * deltaTime; // Needs deltaTime access
-             // this.y -= this.velocityY * deltaTime;
-             // this.velocityX = 0;
-             // this.velocityY = 0;
-        } else if (otherEntity.type === 'item') {
-            // Handle item pickup
-            console.log(`Player collided with item ${otherEntity.id}`);
-            otherEntity.collect(this); // Assume item has a collect method
+            }
         } else {
-            // Default collision behavior from Entity (logging)
-            Entity.prototype.handleCollision.call(this, otherEntity);
+             console.log("[findNearestEnemy] Scene.enemies list not found or not an array."); // DEBUG LOG
+        }
+        
+        if (nearestEnemy) {
+            console.log(`[findNearestEnemy] Found nearest enemy: ${nearestEnemy.id} at distance ${nearestDistance.toFixed(2)}`); // DEBUG LOG
+        } else {
+            console.log("[findNearestEnemy] No suitable enemy found within range."); // DEBUG LOG
+        }
+        
+        return nearestEnemy;
+    }
+
+    updateAttack(deltaTime) {
+        // If we've already hit an enemy during this attack, stop the lunge immediately
+        if (this.enemiesHitThisAttack.size > 0) {
+            this.isAttacking = false;
+            this.attackCooldownTimer = this.attackCooldown;
+            this.setState('idle');
+            this.velocityX = 0; // Stop residual movement
+            this.velocityY = 0;
+            return; // Exit the updateAttack logic early
+        }
+
+        this.lungeTimer += deltaTime;
+        
+        // Apply lunge velocity
+        this.velocityX = this.lungeDirection.x * this.lungeSpeed;
+        this.velocityY = this.lungeDirection.y * this.lungeSpeed;
+        
+        // Track distance traveled
+        const distanceThisFrame = Math.sqrt(
+            (this.velocityX * deltaTime) ** 2 + 
+            (this.velocityY * deltaTime) ** 2
+        );
+        this.lungeDistanceTraveled += distanceThisFrame;
+        
+        // End attack when either timer expires or distance is reached
+        if (this.lungeTimer >= this.lungeDuration || this.lungeDistanceTraveled >= this.lungeDistance) {
+            this.isAttacking = false;
+            this.attackCooldownTimer = this.attackCooldown;
+            this.setState('idle');
         }
     }
 
-    // Need applyForce for knockback if player can be hit
-    applyForce(forceX, forceY) {
-        // Add impulse directly to velocity
-        this.velocityX += forceX;
-        this.velocityY += forceY;
+    // Handle collision with other entities
+    handleCollision(otherEntity) {
+        super.handleCollision(otherEntity);
+
+        // --- Lunge Attack Collision ---
+        if (this.isAttacking) {
+            // Use optional chaining ?. in case otherEntity is null/undefined briefly
+            console.log(`Player attacking, collided with: ${otherEntity?.id} (Type: ${otherEntity?.type})`);
+            if (otherEntity?.type === 'enemy') {
+                 console.log(`>>> Enemy collision detected during attack! Applying effects to ${otherEntity.id}`);
+                 // Ensure enemy is not already dead AND hasn't been hit by this attack yet
+                 if (otherEntity.state !== 'dead' && !this.enemiesHitThisAttack.has(otherEntity.id)) {
+                    // 1. Apply Damage
+                    otherEntity.takeDamage(this.attackPower);
+                    this.enemiesHitThisAttack.add(otherEntity.id); // Mark this enemy as hit for this attack
+
+                    // 2. Apply Knockback
+                    const knockbackForce = 450; // Increased force significantly
+                    const knockbackDirectionX = otherEntity.x - this.x;
+                    const knockbackDirectionY = otherEntity.y - this.y;
+                    // Normalize and apply force (assuming an applyKnockback method exists)
+                    otherEntity.applyKnockback(knockbackDirectionX, knockbackDirectionY, knockbackForce);
+
+                    // 3. Apply Stun (assuming a stun method exists)
+                    const stunDuration = 0.5; // seconds
+                    otherEntity.stun(stunDuration);
+
+                    // 4. Flash is handled automatically by takeDamage in Entity.js
+                 }
+            } else {
+                 console.log(`>>> Collision during attack was NOT with an enemy.`);
+            }
+        }
+        // --- End Lunge Attack Collision ---
+
+        // Original check (commented out while debugging with logs above)
+        // if (this.isAttacking && otherEntity.type === 'enemy') {
+        //     console.log(`Player attacked enemy ${otherEntity.id} for ${this.attackPower} damage`);
+        //     otherEntity.takeDamage(this.attackPower);
+        // }
+    }
+
+    // Override takeDamage to implement player-specific damage handling
+    takeDamage(amount) {
+        // Reduce damage if dashing (optional dodge mechanic)
+        const actualDamage = this.isDashing ? amount * 0.5 : amount;
+        
+        super.takeDamage(actualDamage);
+        console.log(`Player took ${actualDamage} damage, health: ${this.health}/${this.maxHealth}`);
+        
+        // Could add screen shake, flash, etc. here
+    }
+
+    // Override onDeath for player-specific death behavior
+    onDeath() {
+        super.onDeath();
+        console.log("Player has died!");
+        
+        // Stop all movement
+        this.velocityX = 0;
+        this.velocityY = 0;
+        this.isDashing = false;
+        this.isAttacking = false;
+        
+        // Could trigger game over, respawn, etc. here
+    }
+
+    // Clean up when player is destroyed
+    destroy() {
+        window.removeEventListener('mousemove', this.onMouseMove);
+        window.removeEventListener('mousedown', this.onMouseDown);
+        window.removeEventListener('mouseup', this.onMouseUp);
+        super.destroy();
     }
 }

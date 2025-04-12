@@ -25,6 +25,13 @@ class Entity {
         // State management
         this.state = options.state || 'idle'; // e.g., 'idle', 'moving', 'attacking', 'dead'
 
+        // Status Effects
+        this.isStunned = false;
+        this.stunTimer = 0;
+        this.isFlashing = false;
+        this.flashTimer = 0;
+        this.flashColor = 'white'; // Default flash color
+
         // Collision properties
         // Default bounds, can be overridden by sprite/animation later
         this.collisionBounds = options.collisionBounds || { x: 0, y: 0, width: 10, height: 10 };
@@ -43,15 +50,22 @@ class Entity {
 
     // --- Health Methods ---
     takeDamage(amount) {
+        if (this.state === 'dead') return; // Cannot damage dead entities
+
         this.health -= amount;
         if (this.health <= 0) {
             this.health = 0;
             this.setState('dead');
             this.onDeath(); // Callback for death logic
+        } else {
+            // Optional: Trigger a brief flash on taking damage
+            this.flash('red', 0.1);
         }
     }
 
     heal(amount) {
+        if (this.state === 'dead') return; // Cannot heal dead entities
+
         this.health += amount;
         if (this.health > this.maxHealth) {
             this.health = this.maxHealth;
@@ -66,11 +80,13 @@ class Entity {
         this.velocityY = 0;
         this.accelerationX = 0;
         this.accelerationY = 0;
+        this.isStunned = false; // Clear stun on death
+        this.isFlashing = false; // Clear flash on death
     }
 
     // --- State Management ---
     setState(newState) {
-        if (this.state !== newState) {
+        if (this.state !== newState && this.state !== 'dead') { // Don't change state if dead
             this.state = newState;
             this.setAnimation(newState); // Update animation when state changes
             // Add any other logic needed on state change
@@ -136,42 +152,114 @@ class Entity {
     update(deltaTime) {
         if (this.state === 'dead') return; // Don't update physics if dead
 
-        // Apply acceleration
-        this.velocityX += this.accelerationX * deltaTime;
-        this.velocityY += this.accelerationY * deltaTime;
+        // Update Status Effects
+        this.updateStun(deltaTime);
+        this.updateFlash(deltaTime);
 
-        // Apply gravity
-        this.velocityY += this.gravity * deltaTime;
+        // Apply physics only if not stunned
+        if (!this.isStunned) {
+            // Apply acceleration
+            this.velocityX += this.accelerationX * deltaTime;
+            this.velocityY += this.accelerationY * deltaTime;
 
-        // Apply friction (basic damping)
-        this.velocityX *= Math.pow(this.friction, deltaTime * 60); // Scale friction effect by frame rate
-        this.velocityY *= Math.pow(this.friction, deltaTime * 60);
+            // Apply gravity
+            this.velocityY += this.gravity * deltaTime;
 
-        // Clamp velocity
-        this.velocityX = Math.max(-this.maxVelocityX, Math.min(this.maxVelocityX, this.velocityX));
-        this.velocityY = Math.max(-this.maxVelocityY, Math.min(this.maxVelocityY, this.velocityY));
+            // Apply friction (basic damping)
+            this.velocityX *= Math.pow(this.friction, deltaTime * 60); // Scale friction effect by frame rate
+            this.velocityY *= Math.pow(this.friction, deltaTime * 60);
+            if (Math.abs(this.velocityX) > 0.1 || Math.abs(this.velocityY) > 0.1) { // Only log if moving significantly
+                 console.log(`[Entity Update] ID: ${this.id}, After Friction Vel: (${this.velocityX.toFixed(2)}, ${this.velocityY.toFixed(2)})`); // DEBUG LOG
+            }
 
-        // Update position
-        this.x += this.velocityX * deltaTime;
-        this.y += this.velocityY * deltaTime;
+            // Clamp velocity
+            this.velocityX = Math.max(-this.maxVelocityX, Math.min(this.maxVelocityX, this.velocityX));
+            this.velocityY = Math.max(-this.maxVelocityY, Math.min(this.maxVelocityY, this.velocityY));
 
-        // Update state based on movement (simple example)
-        if (Math.abs(this.velocityX) > 0.1 || Math.abs(this.velocityY) > 0.1) {
-             if (this.state === 'idle') this.setState('moving');
+            // Update position
+            this.x += this.velocityX * deltaTime;
+            this.y += this.velocityY * deltaTime;
+
+            // Update state based on movement (simple example)
+            if (Math.abs(this.velocityX) > 0.1 || Math.abs(this.velocityY) > 0.1) {
+                 if (this.state === 'idle') this.setState('moving');
+            } else {
+                 if (this.state === 'moving') this.setState('idle');
+                 // Stop tiny movements (Let friction handle this now)
+            }
         } else {
-             if (this.state === 'moving') this.setState('idle');
-             // Stop tiny movements
-             // Stop tiny movements (Let friction handle this now)
-             // this.velocityX = 0;
-             // this.velocityY = 0;
+            // If stunned, apply friction more aggressively to stop movement quickly
+            this.velocityX *= Math.pow(0.5, deltaTime * 60); // Faster stop
+            this.velocityY *= Math.pow(0.5, deltaTime * 60);
+            // Update position based on residual velocity
+            this.x += this.velocityX * deltaTime;
+            this.y += this.velocityY * deltaTime;
         }
 
-        // Update animation
+
+        // Update animation regardless of stun state (e.g., for hit/stun animation)
         this.updateAnimation(deltaTime);
 
         // Update collision bounds position (relative offset is handled in constructor/updateBounds)
         // The bounds position is now implicitly this.x + this.collisionBounds.x, etc.
-        // No need to update this.collisionBounds.x/y here unless your origin changes
+    }
+
+    // --- Status Effect Methods ---
+
+    applyKnockback(directionX, directionY, force) {
+        if (this.state === 'dead') return;
+
+        const length = Math.sqrt(directionX * directionX + directionY * directionY);
+        if (length > 0) {
+            const normalizedX = directionX / length;
+            const normalizedY = directionY / length;
+            // Apply as an impulse (instant velocity change)
+            this.velocityX += normalizedX * force;
+            this.velocityY += normalizedY * force;
+            console.log(`[Knockback Applied] ID: ${this.id}, Force: ${force}, New Vel: (${this.velocityX.toFixed(2)}, ${this.velocityY.toFixed(2)})`);
+        }
+    }
+
+    stun(duration) {
+        if (this.state === 'dead') return;
+
+        this.isStunned = true;
+        this.stunTimer = Math.max(this.stunTimer, duration); // Take the longer duration if already stunned
+        console.log(`Stunned ${this.id} for ${duration}s`);
+        this.flash('white', duration); // Add a white flash for the duration of the stun
+        // Optionally set state to 'stunned' if you have specific animations/logic
+        // this.setState('stunned');
+    }
+
+    updateStun(deltaTime) {
+        if (this.isStunned) {
+            this.stunTimer -= deltaTime;
+            if (this.stunTimer <= 0) {
+                this.isStunned = false;
+                this.stunTimer = 0;
+                console.log(`Stun ended for ${this.id}`);
+                // Optionally revert state if you used a 'stunned' state
+                // if (this.state === 'stunned') this.setState('idle');
+            }
+        }
+    }
+
+    flash(color, duration) {
+        if (this.state === 'dead') return;
+
+        this.isFlashing = true;
+        this.flashColor = color;
+        this.flashTimer = Math.max(this.flashTimer, duration); // Extend flash if already flashing
+    }
+
+    updateFlash(deltaTime) {
+        if (this.isFlashing) {
+            this.flashTimer -= deltaTime;
+            if (this.flashTimer <= 0) {
+                this.isFlashing = false;
+                this.flashTimer = 0;
+            }
+        }
     }
 
     // --- Collision Methods ---
@@ -218,7 +306,7 @@ class Entity {
     handleCollision(otherEntity) {
         // Placeholder for collision response logic
         // This should be overridden by subclasses (Player, Enemy, etc.)
-        console.log(`Entity ${this.id} (${this.type}) collided with ${otherEntity.id} (${otherEntity.type})`);
+        // console.log(`Entity ${this.id} (${this.type}) collided with ${otherEntity.id} (${otherEntity.type})`);
 
         // Example basic response: Stop movement towards the other entity
         // This is very basic and often needs more sophisticated resolution
@@ -254,6 +342,25 @@ class Entity {
         }
 
         let drawn = false;
+        const bounds = this.getAbsoluteBounds(); // Get bounds once for drawing
+
+        // --- Draw Shadow ---
+        // Simple oval shadow below the entity
+        context.fillStyle = 'rgba(0, 0, 0, 0.3)'; // Semi-transparent black
+        context.beginPath();
+        context.ellipse(
+            bounds.x + bounds.width / 2,    // Center X
+            bounds.y + bounds.height,       // Bottom Y
+            bounds.width / 2 * 0.8,         // Radius X (slightly smaller than width)
+            bounds.height / 4,              // Radius Y (flattened)
+            0,                              // Rotation
+            0,                              // Start Angle
+            Math.PI * 2                     // End Angle
+        );
+        context.fill();
+        // --- End Draw Shadow ---
+
+
         // Try drawing animation frame
         if (this.currentAnimation && this.currentAnimation.frames && this.currentAnimation.frames.length > 0) {
             const frame = this.currentAnimation.frames[this.currentFrame];
@@ -274,7 +381,7 @@ class Entity {
         // Fallback to basic rectangle if no sprite/animation drawn
         if (!drawn) {
             context.fillStyle = 'grey'; // Fallback color
-            const bounds = this.getAbsoluteBounds(); // Draw using absolute bounds
+            // const bounds = this.getAbsoluteBounds(); // Already got bounds above
             context.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
 
              // Draw velocity vector for debugging
@@ -283,6 +390,16 @@ class Entity {
              context.moveTo(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
              context.lineTo(bounds.x + bounds.width / 2 + this.velocityX * 0.1, bounds.y + bounds.height / 2 + this.velocityY * 0.1); // Scale vector for visibility
              context.stroke();
+        }
+
+        // Draw flash effect if active
+        if (this.isFlashing) {
+            context.save(); // Save current context state
+            context.globalAlpha = 0.75; // Increased opacity
+            context.fillStyle = this.flashColor;
+            // const bounds = this.getAbsoluteBounds(); // Already got bounds above
+            context.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+            context.restore(); // Restore context state
         }
 
         // Optional: Draw collision bounds for debugging
