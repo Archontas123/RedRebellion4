@@ -34,7 +34,7 @@ export class Player extends Entity {
         this.dashDistanceTraveled = 0;
 
         // Attack properties
-        this.attackPower = options.attackPower || 15; // Reduced from 25 for testing effects
+        this.attackPower = options.attackPower || 45; // Updated damage
         this.lungeSpeed = this.moveSpeed * 3; // Slightly slower than dash
         this.lungeDistance = 3 * (options.tileSize || 50); // 3 tiles
         this.lungeDuration = 0.2; // in seconds

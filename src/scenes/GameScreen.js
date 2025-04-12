@@ -3,7 +3,9 @@ import WorldManager from '../entities/WorldManager.js';
 import { Player } from '../entities/Player.js'; // Import your Player class
 import { InputHandler } from '../entities/InputHandler.js'; // Import InputHandler
 import { Enemy } from '../entities/Enemy.js'; // Import Enemy class
+import { RangedEnemy } from '../entities/RangedEnemy.js'; // Import RangedEnemy class
 import { EnemyManager } from '../entities/EnemyManager.js'; // Import EnemyManager
+import { Projectile } from '../entities/Projectile.js'; // Import Projectile class
 export default class GameScreen extends Phaser.Scene {
     constructor() {
         super('GameScreen');
@@ -16,10 +18,20 @@ export default class GameScreen extends Phaser.Scene {
         this.debugGraphics = null; // Graphics object for debug drawing
         this.enemyManager = null; // Add EnemyManager instance
         this.enemyVisuals = new Map(); // Map enemy ID to Phaser GameObject
+        this.enemyShadows = new Map(); // Map enemy ID to Phaser Graphics object for shadow
+        this.projectiles = []; // Array to hold projectile instances
+        this.projectileVisuals = new Map(); // Map projectile ID to Phaser GameObject
     }
 
     preload() {
-        // No assets needed for basic terrain/player yet
+        // Create a white dot texture for particles
+        const graphics = this.make.graphics({ x: 0, y: 0, add: false });
+        graphics.fillStyle(0xffffff, 1);
+        graphics.fillCircle(8, 8, 8);
+        graphics.generateTexture('white_dot', 16, 16);
+        graphics.destroy();
+        
+        // Other preload code...
     }
 
     create() {
@@ -86,6 +98,10 @@ export default class GameScreen extends Phaser.Scene {
         // Also make player accessible on the scene itself for enemy AI context
         this.worldManager.player = this.player;
         // this.player = this.player; // This line is redundant, 'this.player' is already set
+
+        // Initialize enemy shadow map
+        this.enemyShadows = new Map();
+
         // Input setup is now handled by InputHandler and Player class
 
         // Initial chunk load based on player start position
@@ -133,45 +149,159 @@ export default class GameScreen extends Phaser.Scene {
         }
         // --- End Shadow Drawing ---
 
-        // --- Update Enemies (Managed by GameScreen loop, populated by EnemyManager) ---
-        const worldContext = this; // The scene itself provides context (like this.player)
+        // --- Update Enemy Manager ---
+        if (this.enemyManager) {
+            this.enemyManager.update(dtSeconds);
+        }
+
+        // --- Update Enemies ---
+        const worldContext = { // Pass necessary context to entities
+            player: this.player,
+            scene: this, // Pass the scene itself for things like projectile creation
+            // Add other relevant context if needed (e.g., world bounds)
+        };
         this.enemies.forEach(enemy => {
+            // --- Shadow Handling ---
+            let shadow = this.enemyShadows.get(enemy.id);
+            if (!shadow && enemy.state !== 'dead') {
+                shadow = this.add.graphics();
+                shadow.setDepth(0.9); // Below enemy visual
+                this.enemyShadows.set(enemy.id, shadow);
+            }
+
+            if (shadow) {
+                shadow.clear(); // Clear previous shadow drawing
+                if (enemy.state !== 'dead') {
+                    const bounds = enemy.getAbsoluteBounds();
+                    const shadowOffsetY = 5;
+                    const shadowScaleX = 0.8;
+                    const shadowScaleY = 0.4;
+                    const shadowAlpha = 0.3;
+                    const shadowX = enemy.x;
+                    const shadowY = enemy.y + bounds.height / 2 + shadowOffsetY;
+                    const shadowRadiusX = (bounds.width / 2) * shadowScaleX;
+                    const shadowRadiusY = shadowRadiusX * shadowScaleY;
+                    if (shadowRadiusX > 0 && shadowRadiusY > 0) {
+                        shadow.fillStyle(0x000000, shadowAlpha);
+                        shadow.fillEllipse(shadowX, shadowY, shadowRadiusX * 2, shadowRadiusY * 2);
+                    }
+                } else {
+                    shadow.destroy();
+                    this.enemyShadows.delete(enemy.id);
+                }
+            }
+            // --- End Shadow Handling ---
+
             if (enemy.state !== 'dead') { // Only update active enemies
                 enemy.update(dtSeconds, worldContext);
 
                 // Ensure visual exists for active enemy
                 if (!this.enemyVisuals.has(enemy.id)) {
+                    // Determine color based on enemy type
+                    let enemyColor = 0xff0000; // Default red for melee
+                    if (enemy instanceof RangedEnemy) {
+                        enemyColor = 0xffa500; // Orange for ranged
+                    }
+
                     const enemyVisual = this.add.rectangle(
                         enemy.x, enemy.y,
-                        enemy.collisionBounds.width, // Use enemy's bounds
+                        enemy.collisionBounds.width,
                         enemy.collisionBounds.height,
-                        0xff0000 // Red color for enemies
+                        enemyColor
                     );
-                    enemyVisual.setDepth(0.95); // Slightly above shadow, below player
+                    enemyVisual.setDepth(0.95);
                     this.enemyVisuals.set(enemy.id, enemyVisual);
                 }
 
-                // Sync enemy visual position
+                // Sync enemy visual position and apply visual effects
                 const visual = this.enemyVisuals.get(enemy.id);
                 if (visual) {
                     visual.setPosition(enemy.x, enemy.y);
+
+                    // Determine base color again for reset
+                    let baseColor = 0xff0000;
+                    if (enemy instanceof RangedEnemy) {
+                        baseColor = 0xffa500;
+                    }
+
+                    // Reset to normal color/state
+                    visual.setFillStyle(baseColor);
+                    visual.setAlpha(1);
+
+                    // Apply hit effect (flash white)
+                    if (enemy.hitEffectTimer > 0) {
+                        visual.setFillStyle(0xffffff);
+                    }
+
+                    // Apply stun effect
+                    if (enemy.isStunned) {
+                        const stunAlpha = 0.5 + (Math.sin(Date.now() / 100) * 0.2);
+                        visual.setFillStyle(0xffffff); // Flash white when stunned
+                        visual.setAlpha(stunAlpha * enemy.stunEffectIntensity);
+                    }
+                }
+            }
+        });
+
+        // --- Update Projectiles ---
+        this.projectiles.forEach(proj => {
+            if (proj.state !== 'dead') {
+                proj.update(dtSeconds, worldContext);
+
+                // Ensure visual exists
+                if (!this.projectileVisuals.has(proj.id)) {
+                    const projVisual = this.add.circle(
+                        proj.x, proj.y,
+                        proj.collisionBounds.width / 2, // Use radius from bounds
+                        0xffff00 // Yellow for projectiles
+                    );
+                    projVisual.setDepth(1.1); // Above player/enemies
+                    this.projectileVisuals.set(proj.id, projVisual);
+                }
+
+                // Sync visual position
+                const visual = this.projectileVisuals.get(proj.id);
+                if (visual) {
+                    visual.setPosition(proj.x, proj.y);
                 }
             }
         });
 
         // --- Collision Detection & Handling ---
+        // Player vs Enemies
         if (this.player.state !== 'dead') {
             this.enemies.forEach(enemy => {
                 if (enemy.state !== 'dead') {
-                    // Use the checkCollision method from Entity.js
                     if (this.player.checkCollision(enemy, dtSeconds)) {
-                        // Collision detected! Call handleCollision on both entities.
                         this.player.handleCollision(enemy);
                         enemy.handleCollision(this.player);
                     }
                 }
             });
         }
+
+        // Projectiles vs Player/Enemies
+        this.projectiles.forEach(proj => {
+            if (proj.state === 'dead') return; // Skip dead projectiles
+
+            // Check against player
+            if (this.player.state !== 'dead' && proj.ownerId !== this.player.id) {
+                 if (proj.checkCollision(this.player, dtSeconds)) {
+                     proj.handleCollision(this.player); // Projectile handles hitting player
+                     // Player's takeDamage is called within projectile's handleCollision
+                 }
+            }
+
+            // Check against enemies
+            this.enemies.forEach(enemy => {
+                if (enemy.state !== 'dead' && proj.ownerId !== enemy.id) {
+                    if (proj.checkCollision(enemy, dtSeconds)) {
+                        proj.handleCollision(enemy); // Projectile handles hitting enemy
+                        // Enemy's takeDamage is called within projectile's handleCollision
+                    }
+                }
+            });
+        });
         // --- End Collision Detection ---
 
 
@@ -191,20 +321,33 @@ export default class GameScreen extends Phaser.Scene {
         //     }
         // }); // Also comment out the closing part of the debug loop
 
-        // Remove dead enemies from the scene's list
-        // This ensures they stop being updated and drawn by the scene loop
+        // --- Cleanup Dead Entities ---
+        // Remove dead enemies
         this.enemies = this.enemies.filter(enemy => {
             if (enemy.state === 'dead') {
-                // Handle enemy visual removal
                 const visual = this.enemyVisuals.get(enemy.id);
-                if (visual) {
-                    visual.destroy();
-                    this.enemyVisuals.delete(enemy.id);
-                }
-                return false; // Remove from scene's array
+                if (visual) visual.destroy();
+                this.enemyVisuals.delete(enemy.id);
+
+                const shadow = this.enemyShadows.get(enemy.id);
+                if (shadow) shadow.destroy();
+                this.enemyShadows.delete(enemy.id);
+                return false; // Remove
             }
-            return true; // Keep in scene's array
+            return true; // Keep
         });
+
+        // Remove dead projectiles
+        this.projectiles = this.projectiles.filter(proj => {
+            if (proj.state === 'dead') {
+                const visual = this.projectileVisuals.get(proj.id);
+                if (visual) visual.destroy();
+                this.projectileVisuals.delete(proj.id);
+                return false; // Remove
+            }
+            return true; // Keep
+        });
+        // --- End Cleanup ---
 
 
         // Update world chunks based on the player data instance's position
@@ -215,6 +358,113 @@ export default class GameScreen extends Phaser.Scene {
         // // you would need a different approach in Phaser (e.g., using Graphics objects).
         // // For now, we assume rendering is handled by the playerVisual.
     }
+
+    // --- Effect Creation Methods ---
+
+    // Updated createImpactEffect method for Phaser 3.80.1
+    createImpactEffect(x, y) {
+        // Create a circular impact marker
+        const impactCircle = this.add.circle(x, y, 20, 0xffffff, 0.8);
+        impactCircle.setDepth(2); // Above most elements
+
+        // Create expanding ring
+        const ring = this.add.circle(x, y, 10, 0xffffff, 0);
+        ring.setStrokeStyle(3, 0xffffff, 0.8);
+        ring.setDepth(2);
+
+        // Create multiple particles manually instead of using particle emitter
+        const particleCount = 10;
+        const particles = [];
+
+        for (let i = 0; i < particleCount; i++) {
+            // Create a small white circle as a particle
+            const particle = this.add.circle(x, y, 3, 0xffffff, 0.8);
+            particle.setDepth(2);
+
+            // Random angle and speed
+            const angle = Math.random() * Math.PI * 2;
+            const speed = 50 + Math.random() * 150;
+            const velocityX = Math.cos(angle) * speed;
+            const velocityY = Math.sin(angle) * speed;
+
+            // Add to particles array for cleanup
+            particles.push(particle);
+
+            // Animate each particle
+            this.tweens.add({
+                targets: particle,
+                x: particle.x + velocityX,
+                y: particle.y + velocityY,
+                alpha: 0,
+                scale: 0,
+                duration: 300,
+                ease: 'Power2',
+                onComplete: () => {
+                    particle.destroy();
+                }
+            });
+        }
+
+        // Animate and then destroy the impact effects
+        this.tweens.add({
+            targets: impactCircle,
+            alpha: 0,
+            scale: 1.5,
+            duration: 200,
+            ease: 'Power2',
+            onComplete: () => {
+                impactCircle.destroy();
+            }
+        });
+
+        this.tweens.add({
+            targets: ring,
+            scaleX: 4,
+            scaleY: 4,
+            alpha: 0,
+            duration: 300,
+            ease: 'Power2',
+            onComplete: () => {
+                ring.destroy();
+            }
+        });
+
+        // Add screen shake effect
+        this.cameras.main.shake(100, 0.01);
+    }
+
+    // Add a method for dash trail effects
+    createDashTrailEffect(x, y) {
+        // Create a fading dash trail marker
+        const trailMarker = this.add.circle(x, y, 15, 0xffffff, 0.4); // Changed color to white
+        trailMarker.setDepth(0.5); // Below player
+
+        // Fade and disappear
+        this.tweens.add({
+            targets: trailMarker,
+            alpha: 0,
+            scale: 0.5,
+            duration: 300,
+            ease: 'Power2',
+            onComplete: () => {
+                trailMarker.destroy();
+            }
+        });
+    }
+
+    // Method called by RangedEnemy to create a projectile
+    createProjectile(x, y, direction, speed, damage, ownerId, type) {
+        // Create the logical projectile instance
+        const projectile = new Projectile(x, y, direction, speed, damage, ownerId, type);
+
+        // Add to the scene's projectile list for updates and collision checks
+        this.projectiles.push(projectile);
+
+        // Visual creation will happen in the update loop when the projectile is detected
+        // console.log(`Projectile ${projectile.id} created by ${ownerId}`); // Optional debug log
+        return projectile; // Return instance if needed
+    }
+    // --- End Effect Creation Methods ---
 
     shutdown() {
         // Destroy InputHandler to remove listeners
@@ -241,9 +491,16 @@ export default class GameScreen extends Phaser.Scene {
         if (this.playerShadow) this.playerShadow.destroy();
         this.debugGraphics = null;
         if (this.debugGraphics) this.debugGraphics.destroy();
-        // Destroy any remaining enemy visuals
+        // Destroy any remaining enemy visuals and shadows
         this.enemyVisuals.forEach(visual => visual.destroy());
         this.enemyVisuals.clear();
-        this.enemies = []; // Clear the array
+        this.enemyShadows.forEach(shadow => shadow.destroy());
+        this.enemyShadows.clear();
+        this.enemies = [];
+
+        // Destroy any remaining projectile visuals
+        this.projectileVisuals.forEach(visual => visual.destroy());
+        this.projectileVisuals.clear();
+        this.projectiles = [];
     }
 }
