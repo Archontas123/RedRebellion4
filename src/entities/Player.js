@@ -34,7 +34,7 @@ export class Player extends Entity {
         this.dashDistanceTraveled = 0;
 
         // Attack properties
-        this.attackPower = options.attackPower || 45; // Updated damage
+        this.attackPower = options.attackPower || 12; // Updated damage
         this.lungeSpeed = this.moveSpeed * 3; // Slightly slower than dash
         this.lungeDistance = 3 * (options.tileSize || 50); // 3 tiles
         this.lungeDuration = 0.2; // in seconds
@@ -358,7 +358,6 @@ handleCollision(otherEntity) {
 
     // --- Lunge Attack Collision ---
     if (this.isAttacking) {
-        // Use optional chaining ?. in case otherEntity is null/undefined briefly
         console.log(`Player attacking, collided with: ${otherEntity?.id} (Type: ${otherEntity?.type})`);
         if (otherEntity?.type === 'enemy') {
              console.log(`>>> Enemy collision detected during attack! Applying effects to ${otherEntity.id}`);
@@ -369,48 +368,66 @@ handleCollision(otherEntity) {
                 this.enemiesHitThisAttack.add(otherEntity.id); // Mark this enemy as hit for this attack
 
                 // 2. Apply Enhanced Knockback
-                const knockbackForce = 600; // Increased force significantly
-                const knockbackDirectionX = otherEntity.x - this.x;
-                const knockbackDirectionY = otherEntity.y - this.y;
-                // Normalize and apply force
-                otherEntity.applyKnockback(knockbackDirectionX, knockbackDirectionY, knockbackForce);
+                // 2. Apply Enhanced Knockback - use the new method
+                if (this.scene && this.scene.applyEnhancedKnockback) {
+                    const knockbackForce = 800; // Increased force significantly
+                    const knockbackDirectionX = otherEntity.x - this.x;
+                    const knockbackDirectionY = otherEntity.y - this.y;
+                    this.scene.applyEnhancedKnockback(otherEntity, knockbackDirectionX, knockbackDirectionY, knockbackForce);
+                } else {
+                    // Fallback to entity's method if our enhanced version isn't available
+                    const knockbackForce = 600;
+                    const knockbackDirectionX = otherEntity.x - this.x;
+                    const knockbackDirectionY = otherEntity.y - this.y;
+                    otherEntity.applyKnockback(knockbackDirectionX, knockbackDirectionY, knockbackForce);
+                }
 
                 // 3. Apply longer stun
                 const stunDuration = 0.8; // seconds - increased from 0.5
                 otherEntity.stun(stunDuration);
 
-                // 4. Create impact effect at the hit location
+                // 4. Apply hit flash effect
+                if (this.scene && this.scene.applyHitFlash) {
+                    this.scene.applyHitFlash(otherEntity);
+                }
+
+                // 5. Create impact effect at the hit location
                 if (this.scene && this.scene.createImpactEffect) {
                     this.scene.createImpactEffect(otherEntity.x, otherEntity.y);
                 }
 
-                // 5. Trigger camera shake for feedback
+                // 6. Trigger camera shake for feedback
                 if (this.scene && this.scene.cameras && this.scene.cameras.main) {
                     this.scene.cameras.main.shake(100, 0.01); // Duration: 100ms, Intensity: 0.01
                 }
 
-                // 6. Briefly pause time for hit-stop effect (makes hits feel weightier)
-                if (this.scene) {
-                    // Save current velocities
-                    const playerVelX = this.velocityX;
-                    const playerVelY = this.velocityY;
-                    const enemyVelX = otherEntity.velocityX;
-                    const enemyVelY = otherEntity.velocityY;
-                    
-                    // Stop all movement momentarily
-                    this.velocityX = 0;
-                    this.velocityY = 0;
-                    otherEntity.velocityX = 0;
-                    otherEntity.velocityY = 0;
-                    
-                    // Resume after brief pause with slightly reduced player velocity
-                    this.scene.time.delayedCall(80, () => {
-                        // Resume with some velocity reduction (to make hits feel impactful)
-                        this.velocityX = playerVelX * 0.7;
-                        this.velocityY = playerVelY * 0.7;
+                // 7. Enhanced hit-stop effect scaled by damage
+                if (this.scene && this.scene.applyHitStop) {
+                    this.scene.applyHitStop(this, otherEntity, this.attackPower);
+                } else {
+                    // Fallback to old hit-stop if enhanced version isn't available
+                    if (this.scene) {
+                        // Save current velocities
+                        const playerVelX = this.velocityX;
+                        const playerVelY = this.velocityY;
+                        const enemyVelX = otherEntity.velocityX;
+                        const enemyVelY = otherEntity.velocityY;
                         
-                        // Enemy velocity is set by knockback, no need to restore
-                    });
+                        // Stop all movement momentarily
+                        this.velocityX = 0;
+                        this.velocityY = 0;
+                        otherEntity.velocityX = 0;
+                        otherEntity.velocityY = 0;
+                        
+                        // Resume after brief pause with slightly reduced player velocity
+                        this.scene.time.delayedCall(80, () => {
+                            // Resume with some velocity reduction (to make hits feel impactful)
+                            this.velocityX = playerVelX * 0.7;
+                            this.velocityY = playerVelY * 0.7;
+                            
+                            // Enemy velocity is set by knockback, no need to restore
+                        });
+                    }
                 }
              }
         }
