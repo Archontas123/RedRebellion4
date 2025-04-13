@@ -190,12 +190,14 @@ export class Enemy extends Entity {
 
     // Override takeDamage to add hit effects
     takeDamage(amount) {
+        const oldHealth = this.health;
         super.takeDamage(amount);
+        console.log(`Enemy ${this.id} took ${amount} damage. Health: ${oldHealth} -> ${this.health}`);
 
-        // Start hit effect
+        // Start hit effect (from original method)
         this.hitEffectTimer = this.hitEffectDuration;
 
-        // Reset stun effect intensity when taking damage
+        // Reset stun effect intensity when taking damage (from original method)
         this.stunEffectIntensity = 1.0;
     }
 

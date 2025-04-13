@@ -13,6 +13,9 @@ export class Player extends Entity {
 
         super(x, y, playerOptions);
 
+        // Store scene reference if provided
+        this.scene = options.scene || null;
+
         // Input handling
         this.inputHandler = inputHandler;
 
@@ -110,7 +113,10 @@ export class Player extends Entity {
     }
 
     update(deltaTime, scene) {
-        this.scene = scene; // Store the scene reference
+        // Only update scene reference if it's not already set
+        if (!this.scene && scene) {
+            this.scene = scene;
+        }
         if (this.state === 'dead') return;
 
         // Reset velocity before processing inputs and states
@@ -368,18 +374,11 @@ handleCollision(otherEntity) {
                 this.enemiesHitThisAttack.add(otherEntity.id); // Mark this enemy as hit for this attack
 
                 // 2. Apply Enhanced Knockback
-                // 2. Apply Enhanced Knockback - use the new method
-                if (this.scene && this.scene.applyEnhancedKnockback) {
-                    const knockbackForce = 800; // Increased force significantly
+                if (this.scene) {
+                    const knockbackForce = 800;
                     const knockbackDirectionX = otherEntity.x - this.x;
                     const knockbackDirectionY = otherEntity.y - this.y;
                     this.scene.applyEnhancedKnockback(otherEntity, knockbackDirectionX, knockbackDirectionY, knockbackForce);
-                } else {
-                    // Fallback to entity's method if our enhanced version isn't available
-                    const knockbackForce = 600;
-                    const knockbackDirectionX = otherEntity.x - this.x;
-                    const knockbackDirectionY = otherEntity.y - this.y;
-                    otherEntity.applyKnockback(knockbackDirectionX, knockbackDirectionY, knockbackForce);
                 }
 
                 // 3. Apply longer stun

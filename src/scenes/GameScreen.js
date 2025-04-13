@@ -52,8 +52,8 @@ export default class GameScreen extends Phaser.Scene {
 
         // Create instance of your Player class
         this.player = new Player(startX, startY, this.inputHandler, {
-             // Set collision bounds to match tile size
-             collisionBounds: { x: 0, y: 0, width: TILE_SIZE, height: TILE_SIZE }
+            collisionBounds: { x: 0, y: 0, width: TILE_SIZE, height: TILE_SIZE },
+            scene: this  // Pass scene reference during creation
         });
         this.player.scene = this; // Give player a reference to the scene
 
@@ -169,9 +169,18 @@ export default class GameScreen extends Phaser.Scene {
                 if (enemy.state !== 'dead') {
                     // Use the checkCollision method from Entity.js
                     if (this.player.checkCollision(enemy, dtSeconds)) {
-                        // Collision detected! Call handleCollision on both entities.
-                        this.player.handleCollision(enemy);
-                        enemy.handleCollision(this.player);
+                        // Check if the player is attacking and this enemy hasn't been hit yet in this attack
+                        if (this.player.isAttacking && !this.player.enemiesHitThisAttack.has(enemy.id)) {
+                            // Handle the attack collision
+                            this.player.handleCollision(enemy);
+                            enemy.handleCollision(this.player);
+                        }
+                        // For non-attack collisions or enemies already hit this attack
+                        else if (!this.player.isAttacking) {
+                            // Normal collision handling
+                            this.player.handleCollision(enemy);
+                            enemy.handleCollision(this.player);
+                        }
                     }
                 }
             });
@@ -206,45 +215,52 @@ export default class GameScreen extends Phaser.Scene {
         this.worldManager.update(this.player.x, this.player.y);
     }
 
-    // 1. Enhanced Flash Effect - Make it much more obvious
-    applyHitFlash(enemy) {
-        if (!enemy) return;
+// Fixed hit flash method that doesn't use createTimeline
+applyHitFlash(enemy) {
+    if (!enemy) return;
+    
+    const visual = this.enemyVisuals.get(enemy.id);
+    if (!visual) return;
+    
+    // Set a flag to prevent duplicate flashes
+    enemy.isFlashing = true;
+    
+    // Original color (assuming red enemies)
+    const originalColor = 0xff0000;
+    const originalScale = visual.scale;
+    
+    // First flash - pure bright white
+    visual.setFillStyle(0xffffff);
+    visual.setAlpha(1.0);
+    visual.setScale(1.3); // Grow slightly for impact
+    
+    // Use delayedCall for the sequence instead of a timeline
+    this.time.delayedCall(100, () => {
+        if (!visual || !visual.active) return;
         
-        const visual = this.enemyVisuals.get(enemy.id);
-        if (!visual) return;
+        // Back to red
+        visual.setFillStyle(originalColor);
+        visual.setScale(1.1);
         
-        // Set a flag to prevent duplicate flashes
-        enemy.isFlashing = true;
-        
-        // Original color (assuming red enemies)
-        const originalColor = 0xff0000;
-        
-        // ENHANCED FLASH SEQUENCE - Much more pronounced
-        
-        // First flash - pure bright white and enlarge slightly
-        visual.setFillStyle(0xffffff);
-        visual.setAlpha(1.0);
-        visual.setScale(1.3); // Grow slightly for more impact
-        
-        this.time.delayedCall(100, () => {
-            // Back to red, maintain scale
-            visual.setFillStyle(originalColor);
+        this.time.delayedCall(70, () => {
+            if (!visual || !visual.active) return;
+            
+            // Second flash - white again
+            visual.setFillStyle(0xffffff);
+            visual.setAlpha(0.9);
             
             this.time.delayedCall(70, () => {
-                // Second flash - bright white again but less intense
-                visual.setFillStyle(0xffffff);
-                visual.setAlpha(0.9);
+                if (!visual || !visual.active) return;
                 
-                this.time.delayedCall(70, () => {
-                    // Return to normal
-                    visual.setFillStyle(originalColor);
-                    visual.setScale(1.0); // Reset scale
-                    visual.setAlpha(1.0);
-                    enemy.isFlashing = false;
-                });
+                // Return to normal
+                visual.setFillStyle(originalColor);
+                visual.setScale(originalScale);
+                visual.setAlpha(1.0);
+                enemy.isFlashing = false;
             });
         });
-    }
+    });
+}
 
     // Update enemy visuals including stun effects
     updateEnemyVisuals() {
@@ -262,51 +278,99 @@ export default class GameScreen extends Phaser.Scene {
 
             // Apply stun visual if enemy is stunned
             if (enemy.isStunned) {
-                // Just display normal enemy color while stunned (no white flash)
+                // Display normal enemy color while stunned (no white flash)
                 visual.setFillStyle(0xff0000); // Default red color
                 visual.setAlpha(1);
 
-                // You can optionally add a visual indicator for stunned state
-                // like small stars or a symbol above the enemy
-
-                // If you want to keep track of stun symbols
-                if (!enemy.stunSymbol) {
-                    // Create a stun indicator (like a star or "zz" text)
-                    const stunX = enemy.x;
-                    const stunY = enemy.y - 20; // Position above enemy
-
-                    // Simple text as a stun indicator
-                    enemy.stunSymbol = this.add.text(
-                        stunX,
-                        stunY,
-                        "✶", // Or "⚡" or "ZZ"
-                        {
-                            fontSize: '20px',
-                            color: '#FFFF00',
-                            stroke: '#000000',
-                            strokeThickness: 3
-                        }
-                    );
-                    enemy.stunSymbol.setOrigin(0.5);
-                    enemy.stunSymbol.setDepth(2); // Above enemies
-                }
-
-                // Update position of stun symbol if it exists
-                if (enemy.stunSymbol) {
-                    enemy.stunSymbol.setPosition(enemy.x, enemy.y - 20);
-                }
+                // Add confused ring above enemy
+                this.createOrUpdateStunEffect(enemy);
             }
             // Reset to default appearance if not stunned and not flashing
             else {
                 visual.setFillStyle(0xff0000); // Default red color
                 visual.setAlpha(1);
 
-                // Remove stun symbol if it exists
-                if (enemy.stunSymbol) {
-                    enemy.stunSymbol.destroy();
-                    enemy.stunSymbol = null;
+                // Remove stun effect if it exists
+                if (enemy.stunEffect) {
+                    enemy.stunEffect.destroy();
+                    enemy.stunEffect = null;
                 }
             }
+        });
+    }
+
+    // Create or update the stun effect for an enemy
+    createOrUpdateStunEffect(enemy) {
+        // Remove old effect if it exists
+        if (enemy.stunEffect) {
+            enemy.stunEffect.destroy();
+            enemy.stunEffect = null;
+        }
+        
+        // Position above the enemy
+        const stunX = enemy.x;
+        const stunY = enemy.y - 30;
+        
+        // Create a container for the effect
+        enemy.stunEffect = this.add.container(stunX, stunY);
+        enemy.stunEffect.setDepth(2); // Above enemies
+        
+        // Create the ring base
+        const ring = this.add.circle(0, 0, 15, 0xf0f0f0, 0);
+        ring.setStrokeStyle(3, 0xf0f0f0, 0.8);
+        enemy.stunEffect.add(ring);
+        
+        // Add stars orbiting the ring
+        const starCount = 3;
+        const stars = [];
+        
+        for (let i = 0; i < starCount; i++) {
+            // Create a star shape
+            const star = this.add.text(0, 0, "✶", {
+                fontSize: '14px',
+                color: '#FFFF00',
+                stroke: '#000000',
+                strokeThickness: 2
+            });
+            star.setOrigin(0.5);
+            
+            // Position it initially (will be animated)
+            const angle = (i * Math.PI * 2) / starCount;
+            star.x = Math.cos(angle) * 10;
+            star.y = Math.sin(angle) * 10;
+            
+            enemy.stunEffect.add(star);
+            stars.push(star);
+        }
+        
+        // Animate the ring pulsing
+        this.tweens.add({
+            targets: ring,
+            scaleX: 1.2,
+            scaleY: 1.2,
+            alpha: 0.5,
+            duration: 600,
+            yoyo: true,
+            repeat: -1,
+            ease: 'Sine.easeInOut'
+        });
+        
+        // Animate the stars orbiting
+        stars.forEach((star, index) => {
+            // Each star gets its own tween to orbit
+            this.tweens.add({
+                targets: star,
+                angle: 360,
+                duration: 1500,
+                repeat: -1,
+                ease: 'Linear',
+                onUpdate: (tween) => {
+                    const progress = tween.getValue();
+                    const angle = ((index * Math.PI * 2) / starCount) + (progress.angle * Math.PI / 180);
+                    star.x = Math.cos(angle) * 10;
+                    star.y = Math.sin(angle) * 10;
+                }
+            });
         });
     }
 
@@ -404,33 +468,47 @@ export default class GameScreen extends Phaser.Scene {
     // Add this helper method to GameScreen.js
     applyEnhancedKnockback(entity, directionX, directionY, force) {
         if (!entity || entity.state === 'dead') return;
-        
+
+        console.log(`Applying enhanced knockback to ${entity.id} with force ${force}`);
+
         // Calculate normalized direction
         const length = Math.sqrt(directionX * directionX + directionY * directionY);
         if (length === 0) return;
-        
+
         const normalizedX = directionX / length;
         const normalizedY = directionY / length;
-        
+
         // Set a manual position change over time, independent of physics
         const knockbackDistance = force * 0.1; // Scale factor to control distance
         const knockbackDuration = 300; // milliseconds
-        
+
         // Calculate target position
         const targetX = entity.x + normalizedX * knockbackDistance;
         const targetY = entity.y + normalizedY * knockbackDistance;
-        
+
+        console.log(`Knockback from (${entity.x}, ${entity.y}) to (${targetX}, ${targetY})`);
+
+        // Create an object to tween that actually contains the entity's current position
+        const tweenTarget = {
+            x: entity.x,
+            y: entity.y
+        };
+
         // Use a tween for smooth motion
         this.tweens.add({
-            targets: { x: entity.x, y: entity.y },
+            targets: tweenTarget,  // Tween this object, not a temp object
             x: targetX,
             y: targetY,
             duration: knockbackDuration,
             ease: 'Power2Out',
-            onUpdate: (tween) => {
-                const val = tween.getValue();
-                entity.x = val.x;
-                entity.y = val.y;
+            onUpdate: () => {
+                // Update the entity's position from our tweened object
+                entity.x = tweenTarget.x;
+                entity.y = tweenTarget.y;
+                console.log(`Knockback position updated: (${entity.x}, ${entity.y})`);
+            },
+            onComplete: () => {
+                console.log(`Knockback complete for entity ${entity.id}`);
             }
         });
     }
