@@ -368,10 +368,9 @@ handleCollision(otherEntity) {
     // --- Plasma Collection ---
     if (otherEntity?.type === 'plasma') {
         console.log(`Player collided with Plasma ${otherEntity.id}`);
-        this.plasmaCount++;
-        otherEntity.health = 0; // Mark plasma for removal by setting health to 0
-        console.log(`Plasma collected! Current count: ${this.plasmaCount}`);
-        // Optionally play a sound or show a visual effect here
+        // Call the plasma's collect method
+        otherEntity.collect(this);
+        // The plasma's collect method will handle updating the player's plasmaCount
         return; // Stop further collision handling for this item
     }
 
