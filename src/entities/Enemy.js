@@ -245,6 +245,10 @@ export class Enemy extends Entity {
         this.velocityX = 0;
         this.velocityY = 0;
 
+        // Instantly remove stun effect on death
+        this.isStunned = false;
+        this.stunEffectIntensity = 0;
+
         // Could add particle effects, drop items, etc.
     }
 }

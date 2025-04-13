@@ -4,6 +4,7 @@ import { Player } from '../entities/Player.js';
 import { InputHandler } from '../entities/InputHandler.js';
 import { Enemy } from '../entities/Enemy.js';
 import { EnemyManager } from '../entities/EnemyManager.js';
+import { Plasma } from '../entities/Plasma.js'; // Import Plasma
 
 export default class GameScreen extends Phaser.Scene {
     constructor() {
@@ -18,6 +19,10 @@ export default class GameScreen extends Phaser.Scene {
         this.enemyManager = null; // Add EnemyManager instance
         this.enemyVisuals = new Map(); // Map enemy ID to Phaser GameObject
         this.enemyShadows = new Map(); // Map enemy ID to Phaser Graphics object for shadow
+        this.items = []; // Array to hold item instances (like Plasma)
+        this.itemVisuals = new Map(); // Map item ID to Phaser GameObject
+        this.itemShadows = new Map(); // Map item ID to Phaser Graphics object for shadow
+        this.plasmaCounterText = null; // UI Text for plasma count
     }
 
     preload() {
@@ -91,6 +96,16 @@ export default class GameScreen extends Phaser.Scene {
 
         // Initial chunk load based on player start position
         this.worldManager.update(this.player.x, this.player.y);
+
+        // --- UI Setup ---
+        this.plasmaCounterText = this.add.text(10, 10, 'Plasma: 0', {
+            fontSize: '24px',
+            fill: '#FFFFFF', // White color
+            stroke: '#000000', // Black stroke
+            strokeThickness: 4
+        });
+        this.plasmaCounterText.setScrollFactor(0); // Keep text fixed on screen
+        this.plasmaCounterText.setDepth(10); // Ensure UI is on top
     }
 
     update(time, delta) {
@@ -213,8 +228,70 @@ export default class GameScreen extends Phaser.Scene {
                     }
                 }
             });
+
+            // --- Player-Item Collision Check ---
+            this.items.forEach(item => {
+                // Check collision between player and item
+                if (this.player.checkCollision(item, dtSeconds)) {
+                    // Let the player handle the collision (which includes collection logic)
+                    this.player.handleCollision(item);
+                    // Note: The item removal is handled later in the update loop based on item.health <= 0
+                }
+            });
+            // --- End Player-Item Collision Check ---
         }
         // --- End Collision Detection ---
+
+        // --- Update Items ---
+        this.items.forEach(item => {
+            item.update(dtSeconds); // Update item logic (e.g., bobbing)
+
+            // Ensure visual exists for the item
+            if (!this.itemVisuals.has(item.id)) {
+                // Create a visual based on item properties (simple circle for Plasma)
+                const itemVisual = this.add.circle(
+                    item.x, item.y,
+                    item.collisionBounds.width / 2, // Use radius from bounds
+                    0x00FFFF, // Cyan color for Plasma
+                    1 // Alpha
+                );
+                itemVisual.setDepth(0.8); // Draw items below player/enemies but above ground/shadows
+                this.itemVisuals.set(item.id, itemVisual);
+            }
+
+            // Sync item visual position
+            const visual = this.itemVisuals.get(item.id);
+            if (visual) {
+                visual.setPosition(item.x, item.y); // Sync visual position first
+
+                // --- Draw Item Shadow ---
+                let shadow = this.itemShadows.get(item.id);
+                if (!shadow) {
+                    shadow = this.add.graphics();
+                    shadow.setDepth(0.75); // Explicitly set depth below item visual (0.8)
+                    this.itemShadows.set(item.id, shadow);
+                }
+
+                shadow.clear();
+                const bounds = item.getAbsoluteBounds();
+                const shadowOffsetY = 3; // Smaller offset for items
+                const shadowScaleX = 0.6; // Smaller shadow scale
+                const shadowScaleY = 0.3;
+                const shadowAlpha = 0.3;
+
+                const shadowX = item.x; // Center shadow on item's logical x
+                const shadowY = item.y + bounds.height / 2 + shadowOffsetY; // Position below the logical bottom center
+                const shadowRadiusX = (bounds.width / 2) * shadowScaleX;
+                const shadowRadiusY = shadowRadiusX * shadowScaleY;
+
+                if (shadowRadiusX > 0 && shadowRadiusY > 0) {
+                    shadow.fillStyle(0x000000, shadowAlpha); // Black, semi-transparent
+                    shadow.fillEllipse(shadowX, shadowY, shadowRadiusX * 2, shadowRadiusY * 2); // Phaser uses diameter
+                }
+                // --- End Item Shadow Drawing ---
+            }
+        });
+        // --- End Update Items ---
 
         // --- Debug Drawing ---
         this.debugGraphics.clear(); // Clear previous debug drawings
@@ -222,6 +299,12 @@ export default class GameScreen extends Phaser.Scene {
         // Remove dead enemies from the scene's list
         this.enemies = this.enemies.filter(enemy => {
             if (enemy.state === 'dead') {
+                // --- Spawn Plasma on Death ---
+                console.log(`Enemy ${enemy.id} died, spawning plasma.`);
+                const plasmaDrop = new Plasma(enemy.x, enemy.y);
+                this.items.push(plasmaDrop);
+                // --- End Spawn Plasma ---
+
                 // Handle enemy visual removal
                 const visual = this.enemyVisuals.get(enemy.id);
                 if (visual) {
@@ -229,10 +312,10 @@ export default class GameScreen extends Phaser.Scene {
                     this.enemyVisuals.delete(enemy.id);
                 }
 
-                // Also clean up stun symbol if it exists
-                if (enemy.stunSymbol) {
-                    enemy.stunSymbol.destroy();
-                    enemy.stunSymbol = null;
+                // Also clean up stun effect if it exists
+                if (enemy.stunEffect) {
+                    enemy.stunEffect.destroy(); // Use the correct property name
+                    enemy.stunEffect = null;
                 }
 
                 // Handle enemy shadow removal
@@ -247,8 +330,32 @@ export default class GameScreen extends Phaser.Scene {
             return true; // Keep in scene's array
         });
 
+        // --- Remove collected/dead items ---
+        this.items = this.items.filter(item => {
+            if (item.health <= 0) { // Assuming health <= 0 means collected/destroyed
+                const visual = this.itemVisuals.get(item.id);
+                if (visual) {
+                    visual.destroy();
+                    this.itemVisuals.delete(item.id);
+                }
+                // Remove item shadow
+                const shadow = this.itemShadows.get(item.id);
+                if (shadow) {
+                    shadow.destroy();
+                    this.itemShadows.delete(item.id);
+                }
+                return false; // Remove from items array
+            }
+            return true; // Keep in items array
+        });
+
         // Update world chunks based on the player data instance's position
         this.worldManager.update(this.player.x, this.player.y);
+
+        // --- Update UI ---
+        if (this.plasmaCounterText && this.player) {
+            this.plasmaCounterText.setText(`Plasma: ${this.player.plasmaCount}`);
+        }
     }
 
 

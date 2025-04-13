@@ -58,6 +58,9 @@ export class Player extends Entity {
         window.addEventListener('mousemove', this.onMouseMove.bind(this));
         window.addEventListener('mousedown', this.onMouseDown.bind(this));
         window.addEventListener('mouseup', this.onMouseUp.bind(this));
+
+        // Item collection
+        this.plasmaCount = 0;
     }
 
     onMouseMove(event) {
@@ -361,6 +364,16 @@ export class Player extends Entity {
 // Handle collision with other entities
 handleCollision(otherEntity) {
     super.handleCollision(otherEntity);
+
+    // --- Plasma Collection ---
+    if (otherEntity?.type === 'plasma') {
+        console.log(`Player collided with Plasma ${otherEntity.id}`);
+        this.plasmaCount++;
+        otherEntity.health = 0; // Mark plasma for removal by setting health to 0
+        console.log(`Plasma collected! Current count: ${this.plasmaCount}`);
+        // Optionally play a sound or show a visual effect here
+        return; // Stop further collision handling for this item
+    }
 
     // --- Lunge Attack Collision ---
     if (this.isAttacking) {
