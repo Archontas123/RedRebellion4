@@ -385,10 +385,7 @@ handleCollision(otherEntity) {
                 const stunDuration = 0.8; // seconds - increased from 0.5
                 otherEntity.stun(stunDuration);
 
-                // 4. Apply hit flash effect
-                if (this.scene && this.scene.applyHitFlash) {
-                    this.scene.applyHitFlash(otherEntity);
-                }
+                // 4. Remove hitFlash call since the enemy handles it internally
 
                 // 5. Create impact effect at the hit location
                 if (this.scene && this.scene.createImpactEffect) {

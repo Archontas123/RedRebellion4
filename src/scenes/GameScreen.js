@@ -17,6 +17,7 @@ export default class GameScreen extends Phaser.Scene {
         this.debugGraphics = null; // Graphics object for debug drawing
         this.enemyManager = null; // Add EnemyManager instance
         this.enemyVisuals = new Map(); // Map enemy ID to Phaser GameObject
+        this.enemyShadows = new Map(); // Map enemy ID to Phaser Graphics object for shadow
     }
 
     preload() {
@@ -156,6 +157,34 @@ export default class GameScreen extends Phaser.Scene {
                 const visual = this.enemyVisuals.get(enemy.id);
                 if (visual) {
                     visual.setPosition(enemy.x, enemy.y);
+
+                    // --- Draw Enemy Shadow ---
+                    let shadow = this.enemyShadows.get(enemy.id);
+                    if (!shadow) {
+                        shadow = this.add.graphics();
+                        shadow.setDepth(visual.depth - 0.01); // Draw shadow just below the visual
+                        this.enemyShadows.set(enemy.id, shadow);
+                    }
+
+                    shadow.clear();
+                    if (enemy.state !== 'dead') {
+                        const bounds = enemy.getAbsoluteBounds();
+                        const shadowOffsetY = 5;
+                        const shadowScaleX = 0.8;
+                        const shadowScaleY = 0.4;
+                        const shadowAlpha = 0.3;
+
+                        const shadowX = enemy.x; // Center shadow on enemy's logical x
+                        const shadowY = enemy.y + bounds.height / 2 + shadowOffsetY; // Position below the logical bottom center
+                        const shadowRadiusX = (bounds.width / 2) * shadowScaleX;
+                        const shadowRadiusY = shadowRadiusX * shadowScaleY;
+
+                        if (shadowRadiusX > 0 && shadowRadiusY > 0) {
+                            shadow.fillStyle(0x000000, shadowAlpha); // Black, semi-transparent
+                            shadow.fillEllipse(shadowX, shadowY, shadowRadiusX * 2, shadowRadiusY * 2); // Phaser uses diameter
+                        }
+                    }
+                    // --- End Enemy Shadow Drawing ---
                 }
             }
         });
@@ -206,6 +235,13 @@ export default class GameScreen extends Phaser.Scene {
                     enemy.stunSymbol = null;
                 }
 
+                // Handle enemy shadow removal
+                const shadow = this.enemyShadows.get(enemy.id);
+                if (shadow) {
+                    shadow.destroy();
+                    this.enemyShadows.delete(enemy.id);
+                }
+
                 return false; // Remove from scene's array
             }
             return true; // Keep in scene's array
@@ -215,164 +251,145 @@ export default class GameScreen extends Phaser.Scene {
         this.worldManager.update(this.player.x, this.player.y);
     }
 
-// Fixed hit flash method that doesn't use createTimeline
-applyHitFlash(enemy) {
-    if (!enemy) return;
-    
-    const visual = this.enemyVisuals.get(enemy.id);
-    if (!visual) return;
-    
-    // Set a flag to prevent duplicate flashes
-    enemy.isFlashing = true;
-    
-    // Original color (assuming red enemies)
-    const originalColor = 0xff0000;
-    const originalScale = visual.scale;
-    
-    // First flash - pure bright white
-    visual.setFillStyle(0xffffff);
-    visual.setAlpha(1.0);
-    visual.setScale(1.3); // Grow slightly for impact
-    
-    // Use delayedCall for the sequence instead of a timeline
-    this.time.delayedCall(100, () => {
-        if (!visual || !visual.active) return;
-        
-        // Back to red
-        visual.setFillStyle(originalColor);
-        visual.setScale(1.1);
-        
-        this.time.delayedCall(70, () => {
-            if (!visual || !visual.active) return;
-            
-            // Second flash - white again
+
+// Update enemy visuals including stun effects and flashing
+updateEnemyVisuals() {
+    this.enemies.forEach(enemy => {
+        if (enemy.state === 'dead') return;
+
+        const visual = this.enemyVisuals.get(enemy.id);
+        if (!visual) return;
+
+        // Check if enemy is in flashing state (from Enemy.js)
+        if (enemy.isFlashing) {
+            // Apply white flash visual
             visual.setFillStyle(0xffffff);
-            visual.setAlpha(0.9);
-            
-            this.time.delayedCall(70, () => {
-                if (!visual || !visual.active) return;
-                
-                // Return to normal
-                visual.setFillStyle(originalColor);
-                visual.setScale(originalScale);
-                visual.setAlpha(1.0);
-                enemy.isFlashing = false;
-            });
-        });
+
+            // Scale effect based on how recent the hit was
+            const flashProgress = enemy.hitEffectTimer / enemy.hitEffectDuration;
+            const scale = 1.0 + (0.3 * flashProgress); // 1.0 to 1.3 scale
+            visual.setScale(scale);
+        }
+        // If not flashing, check for stun
+        else if (enemy.isStunned) {
+            // Display normal enemy color while stunned
+            visual.setFillStyle(0xff0000); // Default red color
+            visual.setScale(1.0); // Normal scale
+
+            // Add confused ring above enemy if not already there
+            if (!enemy.stunEffect) {
+                this.createOrUpdateStunEffect(enemy);
+            } else {
+                // Update stun effect position
+                enemy.stunEffect.setPosition(enemy.x, enemy.y - 30);
+            }
+        }
+        // Otherwise, reset to default appearance
+        else {
+            visual.setFillStyle(0xff0000); // Default red color
+            visual.setScale(1.0); // Normal scale
+            visual.setAlpha(1);
+
+            // Remove stun effect if it exists
+            if (enemy.stunEffect) {
+                enemy.stunEffect.destroy();
+                enemy.stunEffect = null;
+            }
+        }
     });
 }
 
-    // Update enemy visuals including stun effects
-    updateEnemyVisuals() {
-        this.enemies.forEach(enemy => {
-            if (enemy.state === 'dead') return;
+// Simplified createOrUpdateStunEffect method
+createOrUpdateStunEffect(enemy) {
+    if (!enemy || enemy.state === 'dead') return;
 
-            const visual = this.enemyVisuals.get(enemy.id);
-            if (!visual) return;
-
-            // If the enemy is currently displaying a hit flash, don't override it
-            if (enemy.isFlashing) {
-                // The hit flash effect is already being handled by applyHitFlash
-                return;
-            }
-
-            // Apply stun visual if enemy is stunned
-            if (enemy.isStunned) {
-                // Display normal enemy color while stunned (no white flash)
-                visual.setFillStyle(0xff0000); // Default red color
-                visual.setAlpha(1);
-
-                // Add confused ring above enemy
-                this.createOrUpdateStunEffect(enemy);
-            }
-            // Reset to default appearance if not stunned and not flashing
-            else {
-                visual.setFillStyle(0xff0000); // Default red color
-                visual.setAlpha(1);
-
-                // Remove stun effect if it exists
-                if (enemy.stunEffect) {
-                    enemy.stunEffect.destroy();
-                    enemy.stunEffect = null;
-                }
-            }
-        });
+    // Remove old effect if it exists and is active
+    if (enemy.stunEffect && enemy.stunEffect.active) {
+        enemy.stunEffect.destroy();
+        enemy.stunEffect = null;
     }
 
-    // Create or update the stun effect for an enemy
-    createOrUpdateStunEffect(enemy) {
-        // Remove old effect if it exists
-        if (enemy.stunEffect) {
-            enemy.stunEffect.destroy();
-            enemy.stunEffect = null;
-        }
-        
-        // Position above the enemy
-        const stunX = enemy.x;
-        const stunY = enemy.y - 30;
-        
-        // Create a container for the effect
-        enemy.stunEffect = this.add.container(stunX, stunY);
-        enemy.stunEffect.setDepth(2); // Above enemies
-        
-        // Create the ring base
-        const ring = this.add.circle(0, 0, 15, 0xf0f0f0, 0);
-        ring.setStrokeStyle(3, 0xf0f0f0, 0.8);
-        enemy.stunEffect.add(ring);
-        
-        // Add stars orbiting the ring
-        const starCount = 3;
-        const stars = [];
-        
-        for (let i = 0; i < starCount; i++) {
-            // Create a star shape
-            const star = this.add.text(0, 0, "✶", {
-                fontSize: '14px',
-                color: '#FFFF00',
-                stroke: '#000000',
-                strokeThickness: 2
-            });
-            star.setOrigin(0.5);
-            
-            // Position it initially (will be animated)
-            const angle = (i * Math.PI * 2) / starCount;
-            star.x = Math.cos(angle) * 10;
-            star.y = Math.sin(angle) * 10;
-            
-            enemy.stunEffect.add(star);
-            stars.push(star);
-        }
-        
-        // Animate the ring pulsing
-        this.tweens.add({
-            targets: ring,
-            scaleX: 1.2,
-            scaleY: 1.2,
-            alpha: 0.5,
-            duration: 600,
-            yoyo: true,
+    // Only create if the enemy is actually stunned *now*
+    if (!enemy.isStunned) return;
+
+    // Position above the enemy
+    const stunX = enemy.x;
+    const stunY = enemy.y - 30;
+
+    // Create a container for the effect
+    enemy.stunEffect = this.add.container(stunX, stunY);
+    enemy.stunEffect.setDepth(2); // Above enemies
+
+    // Create the ring base
+    const ring = this.add.circle(0, 0, 15, 0xf0f0f0, 0);
+    ring.setStrokeStyle(3, 0xf0f0f0, 0.8);
+    enemy.stunEffect.add(ring);
+
+    // Add stars orbiting the ring
+    const starCount = 3;
+    const stars = [];
+
+    for (let i = 0; i < starCount; i++) {
+        // Create a star shape
+        const star = this.add.text(0, 0, "✶", {
+            fontSize: '14px',
+            color: '#FFFF00',
+            stroke: '#000000',
+            strokeThickness: 2
+        });
+        star.setOrigin(0.5);
+
+        // Position it initially (will be animated)
+        const angle = (i * Math.PI * 2) / starCount;
+        star.x = Math.cos(angle) * 10;
+        star.y = Math.sin(angle) * 10;
+
+        enemy.stunEffect.add(star);
+        stars.push(star);
+    }
+
+    // Animate the ring pulsing
+    const ringTween = this.tweens.add({
+        targets: ring,
+        scaleX: 1.2,
+        scaleY: 1.2,
+        alpha: 0.5,
+        duration: 600,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut'
+    });
+
+    // Animate the stars orbiting
+    const starTweens = stars.map((star, index) => {
+        return this.tweens.add({
+            targets: star,
+            angle: 360, // Use Phaser's angle property for rotation
+            duration: 1500,
             repeat: -1,
-            ease: 'Sine.easeInOut'
+            ease: 'Linear',
+            onUpdate: (tween) => {
+                // Calculate position based on the tween's angle property
+                const currentAngleRad = ((index * Math.PI * 2) / starCount) + Phaser.Math.DegToRad(star.angle);
+                star.x = Math.cos(currentAngleRad) * 10;
+                star.y = Math.sin(currentAngleRad) * 10;
+            }
         });
-        
-        // Animate the stars orbiting
-        stars.forEach((star, index) => {
-            // Each star gets its own tween to orbit
-            this.tweens.add({
-                targets: star,
-                angle: 360,
-                duration: 1500,
-                repeat: -1,
-                ease: 'Linear',
-                onUpdate: (tween) => {
-                    const progress = tween.getValue();
-                    const angle = ((index * Math.PI * 2) / starCount) + (progress.angle * Math.PI / 180);
-                    star.x = Math.cos(angle) * 10;
-                    star.y = Math.sin(angle) * 10;
-                }
-            });
-        });
-    }
+    });
+
+    // Store tweens on the container so they can be stopped when the effect is destroyed
+    enemy.stunEffect.setData('tweens', [ringTween, ...starTweens]);
+
+    // Override destroy method to stop tweens
+    enemy.stunEffect.destroy = function(fromScene) {
+        const tweens = this.getData('tweens');
+        if (tweens) {
+            tweens.forEach(tween => tween.stop());
+        }
+        // Call the original Container destroy method
+        Phaser.GameObjects.Container.prototype.destroy.call(this, fromScene);
+    };
+}
 
     // Create impact effect at hit location
     createImpactEffect(x, y) {

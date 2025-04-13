@@ -15,7 +15,7 @@ export class Enemy extends Entity {
 
         // Enemy specific properties
         this.targetPlayer = null; // Reference to player entity
-        this.detectionRange = options.detectionRange || 300; // How far it can see the player
+        this.detectionRange = options.detectionRange || 600; // How far it can see the player
         this.moveSpeed = options.moveSpeed || 80; // Slower than player
         this.aggressiveness = options.aggressiveness || 0.7; // How likely to pursue player (0-1)
         this.wanderSpeed = this.moveSpeed * 0.5; // Speed while wandering
@@ -52,6 +52,7 @@ export class Enemy extends Entity {
             this.hitEffectTimer -= deltaTime;
             if (this.hitEffectTimer <= 0) {
                 this.hitEffectTimer = 0;
+                this.isFlashing = false; // Clear flashing state when timer expires
             }
         }
 
@@ -178,13 +179,21 @@ export class Enemy extends Entity {
             return;
         }
 
-        // Normalize direction and apply velocity
-        if (distance > 0) {
+        // Define minimum distance based on approximate collision sizes
+        // Assuming both player and enemy are roughly 40 units wide/tall
+        const minDistance = 40; // Stop when centers are this close
+
+        // Normalize direction and apply velocity only if further than minDistance
+        if (distance > minDistance) { // Check if further than minimum distance
             const normalizedX = dx / distance;
             const normalizedY = dy / distance;
 
             this.velocityX = normalizedX * this.moveSpeed;
             this.velocityY = normalizedY * this.moveSpeed;
+        } else {
+            // If too close, stop moving towards the player
+            this.velocityX = 0;
+            this.velocityY = 0;
         }
     }
 
@@ -194,10 +203,11 @@ export class Enemy extends Entity {
         super.takeDamage(amount);
         console.log(`Enemy ${this.id} took ${amount} damage. Health: ${oldHealth} -> ${this.health}`);
 
-        // Start hit effect (from original method)
+        // Always trigger flash effect when taking damage
         this.hitEffectTimer = this.hitEffectDuration;
+        this.isFlashing = true; // Set flashing state to true
 
-        // Reset stun effect intensity when taking damage (from original method)
+        // Reset stun effect intensity when taking damage
         this.stunEffectIntensity = 1.0;
     }
 
