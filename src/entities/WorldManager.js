@@ -67,14 +67,66 @@ export default class WorldManager {
     }
 
     /**
+     * Converts world (pixel) coordinates to global tile coordinates.
+     * @param {number} worldX - The world X coordinate in pixels.
+     * @param {number} worldY - The world Y coordinate in pixels.
+     * @returns {{tileX: number, tileY: number}} An object containing the corresponding tile coordinates.
+     */
+    worldToTileCoords(worldX, worldY) {
+        const tileX = Math.floor(worldX / this.tileSize);
+        const tileY = Math.floor(worldY / this.tileSize);
+        return { tileX, tileY };
+    }
+
+    /**
+     * Converts global tile coordinates to world (pixel) coordinates (center of the tile).
+     * @param {number} tileX - The global tile X coordinate.
+     * @param {number} tileY - The global tile Y coordinate.
+     * @returns {{worldX: number, worldY: number}} An object containing the corresponding world coordinates (center of the tile).
+     */
+    tileToWorldCoords(tileX, tileY) {
+        const worldX = tileX * this.tileSize + this.tileSize / 2;
+        const worldY = tileY * this.tileSize + this.tileSize / 2;
+        return { worldX, worldY };
+    }
+
+    /**
+     * Gets the tile at the specified global tile coordinates.
+     * Returns null if the chunk containing the tile is not loaded.
+     * @param {number} tileX - The global tile X coordinate.
+     * @param {number} tileY - The global tile Y coordinate.
+     * @returns {Tile|null} The Tile object at the given coordinates, or null if not loaded.
+     */
+    getTileAt(tileX, tileY) {
+        const chunkX = Math.floor(tileX / this.chunkSize);
+        const chunkY = Math.floor(tileY / this.chunkSize);
+        const key = this.getChunkKey(chunkX, chunkY);
+
+        if (this.loadedChunks[key]) {
+            const localTileX = tileX % this.chunkSize;
+            const localTileY = tileY % this.chunkSize;
+            // Adjust for negative modulo result if necessary
+            const finalLocalX = localTileX < 0 ? localTileX + this.chunkSize : localTileX;
+            const finalLocalY = localTileY < 0 ? localTileY + this.chunkSize : localTileY;
+            return this.loadedChunks[key].getTile(finalLocalX, finalLocalY);
+        }
+
+        return null; // Chunk not loaded
+    }
+
+
+    /**
      * Updates the loaded chunks based on the player's current position.
      * Should be called in the scene's update loop.
      * @param {number} playerX - Player's world X coordinate.
      * @param {number} playerY - Player's world Y coordinate.
      */
     update(playerX, playerY) {
-        const playerChunkX = Math.floor(playerX / (this.tileSize * this.chunkSize));
-        const playerChunkY = Math.floor(playerY / (this.tileSize * this.chunkSize));
+        // Use the new conversion function
+        const { tileX: playerTileX, tileY: playerTileY } = this.worldToTileCoords(playerX, playerY);
+        const playerChunkX = Math.floor(playerTileX / this.chunkSize);
+        const playerChunkY = Math.floor(playerTileY / this.chunkSize);
+
 
         const chunksToKeep = {};
 

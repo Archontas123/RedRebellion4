@@ -19,6 +19,9 @@ export class Enemy extends Entity {
         this.moveSpeed = options.moveSpeed || 80; // Slower than player
         this.aggressiveness = options.aggressiveness || 0.7; // How likely to pursue player (0-1)
         this.wanderSpeed = this.moveSpeed * 0.5; // Speed while wandering
+        this.damageAmount = options.damageAmount || 10; // Damage dealt on contact
+        this.damageCooldown = options.damageCooldown || 0.5; // Seconds between contact damage ticks (reduced from 1.0)
+        this.damageCooldownTimer = 0; // Timer for contact damage
 
         // AI behavior timing
         this.decisionTimer = 0;
@@ -53,6 +56,14 @@ export class Enemy extends Entity {
             if (this.hitEffectTimer <= 0) {
                 this.hitEffectTimer = 0;
                 this.isFlashing = false; // Clear flashing state when timer expires
+            }
+        }
+
+        // Update damage cooldown timer
+        if (this.damageCooldownTimer > 0) {
+            this.damageCooldownTimer -= deltaTime;
+            if (this.damageCooldownTimer < 0) {
+                this.damageCooldownTimer = 0;
             }
         }
 
@@ -215,13 +226,17 @@ export class Enemy extends Entity {
     handleCollision(otherEntity) {
         super.handleCollision(otherEntity);
 
-        // If hit by player
+        // If colliding with the player
         if (otherEntity.type === 'player') {
-            console.log(`Enemy ${this.id} collided with player ${otherEntity.id}`);
+            console.log(`Enemy ${this.id} collided with player ${otherEntity.id}. Cooldown: ${this.damageCooldownTimer.toFixed(2)}`);
 
-            // Player collision logic handled by Player class's handleCollision method
-            // We don't need to do damage to player here since player.handleCollision
-            // will handle that if appropriate
+            // Check if the enemy can deal damage (cooldown ready and not stunned/dead)
+            if (this.damageCooldownTimer <= 0 && this.state !== 'dead' && !this.isStunned) {
+                console.log(`>>> Enemy ${this.id} applying ${this.damageAmount} damage to player ${otherEntity.id}`);
+                otherEntity.takeDamage(this.damageAmount); // Apply damage to the player
+                this.damageCooldownTimer = this.damageCooldown; // Reset cooldown
+            }
+            // Note: Player's attack collision logic is handled in Player.js handleCollision
         }
     }
 

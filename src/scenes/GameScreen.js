@@ -23,6 +23,8 @@ export default class GameScreen extends Phaser.Scene {
         this.itemVisuals = new Map(); // Map item ID to Phaser GameObject
         this.itemShadows = new Map(); // Map item ID to Phaser Graphics object for shadow
         this.plasmaCounterText = null; // UI Text for plasma count
+        this.playerHpText = null; // UI Text for player HP
+        this.tileCoordsText = null; // UI Text for player tile coordinates
     }
 
     preload() {
@@ -57,7 +59,8 @@ export default class GameScreen extends Phaser.Scene {
         const startY = (this.cameras.main.height / 2);
 
         // Create instance of your Player class
-        this.player = new Player(startX, startY, this.inputHandler, {
+        // Pass the worldManager instance to the Player constructor
+        this.player = new Player(startX, startY, this.inputHandler, this.worldManager, {
             collisionBounds: { x: 0, y: 0, width: TILE_SIZE, height: TILE_SIZE },
             scene: this  // Pass scene reference during creation
         });
@@ -106,6 +109,26 @@ export default class GameScreen extends Phaser.Scene {
         });
         this.plasmaCounterText.setScrollFactor(0); // Keep text fixed on screen
         this.plasmaCounterText.setDepth(10); // Ensure UI is on top
+
+        // Player HP Text
+        this.playerHpText = this.add.text(10, 40, `HP: ${this.player.health}/${this.player.maxHealth}`, {
+            fontSize: '24px',
+            fill: '#00FF00', // Green color for HP
+            stroke: '#000000',
+            strokeThickness: 4
+        });
+        this.playerHpText.setScrollFactor(0);
+        this.playerHpText.setDepth(10);
+
+        // Tile Coordinates Text
+        this.tileCoordsText = this.add.text(10, 70, `Tile: 0, 0`, { // Position below HP
+            fontSize: '18px', // Slightly smaller font
+            fill: '#CCCCCC', // Light gray color
+            stroke: '#000000',
+            strokeThickness: 3
+        });
+        this.tileCoordsText.setScrollFactor(0);
+        this.tileCoordsText.setDepth(10);
     }
 
     update(time, delta) {
@@ -356,7 +379,191 @@ export default class GameScreen extends Phaser.Scene {
         if (this.plasmaCounterText && this.player) {
             this.plasmaCounterText.setText(`Plasma: ${this.player.plasmaCount}`);
         }
+        if (this.playerHpText && this.player) {
+             // Update HP text and color based on health percentage
+            const hpPercent = this.player.health / this.player.maxHealth;
+            let hpColor = '#00FF00'; // Green
+            if (hpPercent < 0.6) hpColor = '#FFFF00'; // Yellow
+            if (hpPercent < 0.3) hpColor = '#FF0000'; // Red
+
+            this.playerHpText.setText(`HP: ${Math.max(0, Math.round(this.player.health))}/${this.player.maxHealth}`);
+            this.playerHpText.setFill(hpColor);
+        }
+        if (this.tileCoordsText && this.player) {
+            this.tileCoordsText.setText(`Tile: ${this.player.currentTileX}, ${this.player.currentTileY}`);
+        }
     }
+// End of update method (Class continues below)
+
+// --- Player Death and Respawn Logic ---
+
+handlePlayerDeath() {
+    // Clear any existing death UI elements if they somehow persist
+    if (this.deathText) this.deathText.destroy();
+    if (this.respawnButton) this.respawnButton.destroy();
+
+    const deathX = this.player.x; // Capture death location
+    const deathY = this.player.y;
+    console.log(`GameScreen: Handling player death at (${deathX.toFixed(0)}, ${deathY.toFixed(0)}).`);
+
+    // Optional: Show a "You Died" message or fade the screen
+    // Store death text reference on the scene
+    this.deathText = this.add.text(this.cameras.main.centerX, this.cameras.main.centerY - 50, 'YOU DIED', {
+        fontSize: '64px',
+        fill: '#ff0000', // Red color
+        stroke: '#000000',
+        strokeThickness: 6,
+        align: 'center'
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(11); // Keep fixed on screen, above UI
+
+    // Hide player visual immediately
+    if (this.playerVisual) {
+        this.playerVisual.setVisible(false);
+    }
+    if (this.playerShadow) {
+        this.playerShadow.setVisible(false);
+    }
+
+    // Create Respawn Button
+    this.respawnButton = this.add.text(this.cameras.main.centerX, this.cameras.main.centerY + 50, 'Respawn', {
+        fontSize: '32px',
+        fill: '#ffffff',
+        backgroundColor: '#555555',
+        padding: { x: 20, y: 10 },
+        align: 'center'
+    })
+    .setOrigin(0.5)
+    .setScrollFactor(0)
+    .setDepth(11)
+    .setInteractive({ useHandCursor: true }); // Make it clickable
+
+    // Add click listener
+    this.respawnButton.on('pointerdown', () => {
+        console.log("Respawn button clicked.");
+        this.respawnPlayer(); // Call respawn (no location needed)
+    });
+}
+
+respawnPlayer() { // No longer needs death location
+    console.log(`GameScreen: Respawning player near (0, 0).`);
+
+    // Remove death UI elements
+    if (this.deathText) {
+        this.deathText.destroy();
+        this.deathText = null;
+    }
+    if (this.respawnButton) {
+        this.respawnButton.destroy();
+        this.respawnButton = null;
+    }
+
+    // Reset player state and health
+    this.player.health = this.player.maxHealth;
+    this.player.state = 'idle'; // Reset state from 'dead'
+    this.player.plasmaCount = 0; // Optional: Reset plasma count on death
+
+    // --- Find Safe Respawn Location near (0, 0) ---
+    const TILE_SIZE = this.worldManager.tileSize; // Get tile size
+    const SAFETY_RADIUS_TILES = 5;
+    const SAFETY_RADIUS_PIXELS = SAFETY_RADIUS_TILES * TILE_SIZE;
+    const MAX_SEARCH_RADIUS_TILES = 20; // Limit search to avoid infinite loops
+
+    let respawnX = 0;
+    let respawnY = 0;
+    let foundSafeSpot = false;
+
+    // Check outwards in rings from (0,0)
+    searchLoop:
+    for (let radius = 0; radius <= MAX_SEARCH_RADIUS_TILES; radius++) {
+        const step = TILE_SIZE; // Check tile centers
+        // Check points on the square ring around (0,0) at this tile radius
+        for (let dx = -radius; dx <= radius; dx++) {
+            for (let dy = -radius; dy <= radius; dy++) {
+                // Only check the perimeter of the square for radius > 0
+                if (radius > 0 && Math.abs(dx) < radius && Math.abs(dy) < radius) {
+                    continue;
+                }
+
+                const potentialX = dx * step;
+                const potentialY = dy * step;
+
+                // Check if this spot is safe from active enemies
+                let isSafe = true;
+                for (const enemy of this.enemies) {
+                    if (enemy.state === 'dead') continue; // Ignore dead enemies
+
+                    // Calculate squared distance for efficiency
+                    const distanceSq = (enemy.x - potentialX) ** 2 + (enemy.y - potentialY) ** 2;
+                    if (distanceSq < SAFETY_RADIUS_PIXELS ** 2) {
+                        isSafe = false;
+                        break; // This spot is not safe, try next point in the inner loops
+                    }
+                }
+
+                if (isSafe) {
+                    respawnX = potentialX;
+                    respawnY = potentialY;
+                    foundSafeSpot = true;
+                    console.log(`GameScreen: Found safe respawn spot at (${respawnX.toFixed(0)}, ${respawnY.toFixed(0)}) after checking radius ${radius}.`);
+                    break searchLoop; // Exit all loops once a safe spot is found
+                }
+            }
+        }
+    }
+
+    if (!foundSafeSpot) {
+        console.warn(`GameScreen: Could not find a safe respawn spot within ${MAX_SEARCH_RADIUS_TILES} tiles of (0,0). Respawning at (0,0) anyway.`);
+        respawnX = 0; // Default to 0,0 if no safe spot found
+        respawnY = 0;
+    }
+    // --- End Find Safe Respawn Location ---
+
+
+    console.log(`GameScreen: Setting respawn position: (${respawnX.toFixed(0)}, ${respawnY.toFixed(0)})`);
+
+    this.player.x = respawnX;
+    this.player.y = respawnY;
+    this.player.velocityX = 0;
+    this.player.velocityY = 0;
+
+    // Make player visual and shadow visible again
+    if (this.playerVisual) {
+        this.playerVisual.setPosition(respawnX, respawnY);
+        this.playerVisual.setVisible(true);
+    }
+     if (this.playerShadow) {
+        this.playerShadow.setVisible(true);
+    }
+
+    // Update UI immediately
+    if (this.plasmaCounterText) {
+        this.plasmaCounterText.setText(`Plasma: ${this.player.plasmaCount}`);
+    }
+    if (this.playerHpText) {
+         this.playerHpText.setText(`HP: ${this.player.health}/${this.player.maxHealth}`);
+         this.playerHpText.setFill('#00FF00'); // Reset color to green on respawn
+    }
+
+    // Optional: Add brief invulnerability or visual effect on respawn
+    if (this.playerVisual) {
+        this.playerVisual.setAlpha(0.5); // Make slightly transparent
+        this.tweens.add({
+            targets: this.playerVisual,
+            alpha: 1,
+            duration: 150, // Flash duration
+            ease: 'Linear',
+            yoyo: true,
+            repeat: 5, // Number of flashes (total duration = duration * (repeat + 1))
+            onComplete: () => {
+                if (this.playerVisual) { // Check if visual still exists
+                   this.playerVisual.setAlpha(1); // Ensure alpha is reset
+                }
+            }
+        });
+    }
+
+    console.log("GameScreen: Player respawned.");
+}
 
 
 // Update enemy visuals including stun effects and flashing
@@ -495,8 +702,8 @@ createOrUpdateStunEffect(enemy) {
         }
         // Call the original Container destroy method
         Phaser.GameObjects.Container.prototype.destroy.call(this, fromScene);
-    };
-}
+    }
+};
 
     // Create impact effect at hit location
     createImpactEffect(x, y) {
@@ -696,4 +903,4 @@ createOrUpdateStunEffect(enemy) {
         this.enemyVisuals.clear();
         this.enemies = []; // Clear the array
     }
-}
+} // End of GameScreen class

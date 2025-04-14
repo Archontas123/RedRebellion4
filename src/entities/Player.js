@@ -2,7 +2,8 @@
 import { Entity } from './Entity.js';
 
 export class Player extends Entity {
-    constructor(x, y, inputHandler, options = {}) {
+    // Add worldManager to the constructor parameters
+    constructor(x, y, inputHandler, worldManager, options = {}) {
         // Default player options
         const playerOptions = {
             type: 'player',
@@ -15,6 +16,12 @@ export class Player extends Entity {
 
         // Store scene reference if provided
         this.scene = options.scene || null;
+
+        // Store WorldManager reference
+        this.worldManager = worldManager; // Added
+        if (!this.worldManager) {
+            console.error("Player created without a WorldManager reference!");
+        }
 
         // Input handling
         this.inputHandler = inputHandler;
@@ -58,6 +65,11 @@ export class Player extends Entity {
         window.addEventListener('mousemove', this.onMouseMove.bind(this));
         window.addEventListener('mousedown', this.onMouseDown.bind(this));
         window.addEventListener('mouseup', this.onMouseUp.bind(this));
+
+        // Add properties for current tile coordinates
+        this.currentTileX = 0; // Added
+        this.currentTileY = 0; // Added
+        this.updateCurrentTileCoords(); // Initialize based on starting position
 
         // Item collection
         this.plasmaCount = 0;
@@ -151,8 +163,14 @@ export class Player extends Entity {
             this.processInput();
         }
 
-        // Call parent update for physics, animation updates, etc.
+        // Call parent update for physics (updates this.x, this.y)
         super.update(deltaTime);
+
+        // --- Update current tile coordinates AFTER position is updated ---
+        this.updateCurrentTileCoords(); // Added call
+
+        // Optional: Log current tile coordinates for debugging
+        // console.log(`Player at Tile: ${this.currentTileX}, ${this.currentTileY}`);
     }
 
     processInput() {
@@ -442,6 +460,20 @@ handleCollision(otherEntity) {
     }
 }
 
+// --- New method to update tile coordinates ---
+updateCurrentTileCoords() {
+    if (this.worldManager) {
+        const { tileX, tileY } = this.worldManager.worldToTileCoords(this.x, this.y);
+        // Check if tile coordinates actually changed to avoid unnecessary updates
+        if (tileX !== this.currentTileX || tileY !== this.currentTileY) {
+             this.currentTileX = tileX;
+             this.currentTileY = tileY;
+             // console.log(`Player entered Tile: ${this.currentTileX}, ${this.currentTileY}`); // Debug log
+             // You could potentially trigger events here if the player enters a new tile
+        }
+    }
+}
+
     // Override takeDamage to implement player-specific damage handling
     takeDamage(amount) {
         // Reduce damage if dashing (optional dodge mechanic)
@@ -455,16 +487,31 @@ handleCollision(otherEntity) {
 
     // Override onDeath for player-specific death behavior
     onDeath() {
-        super.onDeath();
+        super.onDeath(); // Sets state to 'dead'
         console.log("Player has died!");
-        
-        // Stop all movement
+
+        // Stop all movement and actions
         this.velocityX = 0;
         this.velocityY = 0;
         this.isDashing = false;
         this.isAttacking = false;
-        
-        // Could trigger game over, respawn, etc. here
+        this.isMoving = false; // Ensure movement state is also reset
+
+        // Disable further updates/input processing within the player itself
+        // The 'dead' state check in update() already handles this partially
+
+        // TODO: Play death animation if available
+        // this.playAnimation('death'); // Example
+
+        // Notify the scene about the player's death
+        if (this.scene && typeof this.scene.handlePlayerDeath === 'function') {
+            // Notify the scene immediately
+            this.scene.handlePlayerDeath();
+        } else {
+            console.warn("Player died, but scene or handlePlayerDeath method not found.");
+        }
+
+        // Note: Respawn logic will be handled by the GameScreen scene
     }
 
     // Clean up when player is destroyed
