@@ -23,17 +23,21 @@ export default class GameScreen extends Phaser.Scene {
         this.itemVisuals = new Map(); // Map item ID to Phaser GameObject
         this.itemShadows = new Map(); // Map item ID to Phaser Graphics object for shadow
         this.plasmaCounterText = null; // UI Text for plasma count
-        this.playerHpText = null; // UI Text for player HP
+        this.healthBarBorder = null;     // Graphics for health bar border
+        this.healthBarFill = null;       // Graphics object for the gradient fill
         this.tileCoordsText = null; // UI Text for player tile coordinates
     }
 
     preload() {
-        // Create a white dot texture for particles
-        const graphics = this.make.graphics({ x: 0, y: 0, add: false });
+        // --- Create White Dot Texture (existing) ---
+        // Use add.graphics for white dot texture as well for consistency
+        let graphics = this.add.graphics({ x: 0, y: 0 }); // Add directly
         graphics.fillStyle(0xffffff, 1);
         graphics.fillCircle(8, 8, 8);
         graphics.generateTexture('white_dot', 16, 16);
-        graphics.destroy();
+        graphics.destroy(); // Destroy after generating
+
+        // Removed health_gradient texture generation
     }
 
     create() {
@@ -110,16 +114,25 @@ export default class GameScreen extends Phaser.Scene {
         this.plasmaCounterText.setScrollFactor(0); // Keep text fixed on screen
         this.plasmaCounterText.setDepth(10); // Ensure UI is on top
 
-        // Player HP Text
-        this.playerHpText = this.add.text(10, 40, `HP: ${this.player.health}/${this.player.maxHealth}`, {
-            fontSize: '24px',
-            fill: '#00FF00', // Green color for HP
-            stroke: '#000000',
-            strokeThickness: 4
-        });
-        this.playerHpText.setScrollFactor(0);
-        this.playerHpText.setDepth(10);
+        // --- Health Bar ---
+        const healthBarWidth = 200;
+        const healthBarHeight = 20;
+        // Position health bar at absolute top-left
+        const healthBarX = 0;
+        const healthBarY = 0;
 
+        // Create the Graphics object for the fill
+        this.healthBarFill = this.add.graphics();
+        this.healthBarFill.setScrollFactor(0);
+        this.healthBarFill.setDepth(10); // Below border
+
+        // Create the white border (drawn on top)
+        this.healthBarBorder = this.add.graphics();
+        this.healthBarBorder.lineStyle(2, 0xffffff, 1); // White border, thickness 2
+        // Need to redraw border if screen resizes, but for now, draw at initial top-right
+        this.healthBarBorder.strokeRect(healthBarX, healthBarY, healthBarWidth, healthBarHeight); // Draw border at top-left
+        this.healthBarBorder.setScrollFactor(0);
+        this.healthBarBorder.setDepth(10.1); // Draw border above gradient
         // Tile Coordinates Text
         this.tileCoordsText = this.add.text(10, 70, `Tile: 0, 0`, { // Position below HP
             fontSize: '18px', // Slightly smaller font
@@ -379,15 +392,24 @@ export default class GameScreen extends Phaser.Scene {
         if (this.plasmaCounterText && this.player) {
             this.plasmaCounterText.setText(`Plasma: ${this.player.plasmaCount}`);
         }
-        if (this.playerHpText && this.player) {
-             // Update HP text and color based on health percentage
-            const hpPercent = this.player.health / this.player.maxHealth;
-            let hpColor = '#00FF00'; // Green
-            if (hpPercent < 0.6) hpColor = '#FFFF00'; // Yellow
-            if (hpPercent < 0.3) hpColor = '#FF0000'; // Red
+        // --- Health Bar Fill Update ---
+        if (this.healthBarFill && this.player) {
+            const healthBarWidth = 200; // Must match create()
+            const healthBarHeight = 20; // Must match create()
+            // Position health bar at absolute top-left (match create)
+            const healthBarX = 0;
+            const healthBarY = 0;
 
-            this.playerHpText.setText(`HP: ${Math.max(0, Math.round(this.player.health))}/${this.player.maxHealth}`);
-            this.playerHpText.setFill(hpColor);
+            const hpPercent = Math.max(0, this.player.health / this.player.maxHealth);
+            const currentHealthWidth = healthBarWidth * hpPercent;
+
+            this.healthBarFill.clear();
+            // Set gradient fill style (Bright Red left to Dark Red right)
+            this.healthBarFill.fillGradientStyle(0xff0000, 0xff6666, 0xff0000, 0xff6666, 1); // Bright Red to Lighter Red
+            // Draw the rectangle with the current health width
+            if (currentHealthWidth > 0) { // Avoid drawing zero-width rect
+                 this.healthBarFill.fillRect(healthBarX, healthBarY, currentHealthWidth, healthBarHeight); // Draw fill at top-left
+            }
         }
         if (this.tileCoordsText && this.player) {
             this.tileCoordsText.setText(`Tile: ${this.player.currentTileX}, ${this.player.currentTileY}`);
