@@ -5,6 +5,7 @@ import { InputHandler } from '../entities/InputHandler.js';
 import { Enemy } from '../entities/Enemy.js';
 import { EnemyManager } from '../entities/EnemyManager.js';
 import { Plasma } from '../entities/Plasma.js'; // Import Plasma
+import MiniMap from '../ui/MiniMap.js'; // Import MiniMap
 
 export default class GameScreen extends Phaser.Scene {
     constructor() {
@@ -22,10 +23,14 @@ export default class GameScreen extends Phaser.Scene {
         this.items = []; // Array to hold item instances (like Plasma)
         this.itemVisuals = new Map(); // Map item ID to Phaser GameObject
         this.itemShadows = new Map(); // Map item ID to Phaser Graphics object for shadow
-        this.plasmaCounterText = null; // UI Text for plasma count
-        this.healthBarBorder = null;     // Graphics for health bar border
-        this.healthBarFill = null;       // Graphics object for the gradient fill
-        this.tileCoordsText = null; // UI Text for player tile coordinates
+        this.plasmaCounterContainerElement = null; // The main div container
+        this.plasmaCountElement = null; // The span holding the number
+        // Removed Phaser health bar graphics
+        this.healthBarFillElement = null; // Reference to the HTML health bar fill div
+        this.healthBarContainerElement = null; // Reference to the HTML health bar container div
+        // Removed: this.tileCoordsText = null; // UI Text for player tile coordinates (moved to HTML)
+        this.miniMap = null; // Instance of the MiniMap UI handler
+        this.tileCoordsElement = null; // Reference to the HTML coordinate display element
     }
 
     preload() {
@@ -105,43 +110,58 @@ export default class GameScreen extends Phaser.Scene {
         this.worldManager.update(this.player.x, this.player.y);
 
         // --- UI Setup ---
-        this.plasmaCounterText = this.add.text(10, 10, 'Plasma: 0', {
-            fontSize: '24px',
-            fill: '#FFFFFF', // White color
-            stroke: '#000000', // Black stroke
-            strokeThickness: 4
-        });
-        this.plasmaCounterText.setScrollFactor(0); // Keep text fixed on screen
-        this.plasmaCounterText.setDepth(10); // Ensure UI is on top
+        // Get references to the HTML plasma counter elements and make container visible
+        this.plasmaCounterContainerElement = document.getElementById('plasma-counter');
+        this.plasmaCountElement = document.getElementById('plasma-count'); // Get the span for the count
+        if (this.plasmaCounterContainerElement && this.plasmaCountElement) {
+            this.plasmaCounterContainerElement.style.display = 'flex'; // Show the counter (use flex as set in CSS)
+            this.plasmaCountElement.innerText = this.player.plasmaCount; // Initial value (just the number)
 
-        // --- Health Bar ---
-        const healthBarWidth = 200;
-        const healthBarHeight = 20;
-        // Position health bar at absolute top-left
-        const healthBarX = 0;
-        const healthBarY = 0;
+        }
 
-        // Create the Graphics object for the fill
-        this.healthBarFill = this.add.graphics();
-        this.healthBarFill.setScrollFactor(0);
-        this.healthBarFill.setDepth(10); // Below border
 
-        // Create the white border (drawn on top)
-        this.healthBarBorder = this.add.graphics();
-        this.healthBarBorder.lineStyle(2, 0xffffff, 1); // White border, thickness 2
-        // Need to redraw border if screen resizes, but for now, draw at initial top-right
-        this.healthBarBorder.strokeRect(healthBarX, healthBarY, healthBarWidth, healthBarHeight); // Draw border at top-left
-        this.healthBarBorder.setScrollFactor(0);
-        this.healthBarBorder.setDepth(10.1); // Draw border above gradient
-        // Tile Coordinates Text
-        this.tileCoordsText = this.add.text(10, 70, `Tile: 0, 0`, { // Position below HP
-            fontSize: '18px', // Slightly smaller font
-            fill: '#CCCCCC', // Light gray color
-            stroke: '#000000',
-            strokeThickness: 3
-        });
-        this.tileCoordsText.setScrollFactor(0);
-        this.tileCoordsText.setDepth(10);
+        // --- Health Bar (Now handled by HTML/CSS) ---
+        // Get reference to the HTML element once
+        // Get references to HTML elements
+        this.healthBarContainerElement = document.getElementById('health-bar-container');
+        this.healthBarFillElement = document.getElementById('health-bar-fill');
+
+        // Show the health bar container when the scene starts
+        if (this.healthBarContainerElement) {
+            this.healthBarContainerElement.style.display = 'block';
+        } else {
+            console.error("Health bar container element not found in HTML!");
+        }
+        if (!this.healthBarFillElement) {
+            console.error("Health bar fill element not found in HTML!");
+        }
+
+        // Removed Phaser graphics creation for health bar
+
+
+
+
+
+
+
+        // Removed: Phaser Tile Coordinates Text (moved to HTML)
+
+        // --- HTML Tile Coordinates Setup ---
+        this.tileCoordsElement = document.getElementById('tile-coords-display');
+        if (this.tileCoordsElement) {
+            this.tileCoordsElement.style.display = 'block'; // Show the element
+        } else {
+            console.error("Tile coordinates display element not found in HTML!");
+        }
+        // --- End HTML Tile Coordinates Setup ---
+        // --- MiniMap Setup ---
+        // Ensure player, managers are created before initializing minimap
+        if (this.worldManager && this.player && this.enemyManager) {
+            this.miniMap = new MiniMap(this.worldManager, this.player, this); // Pass scene as context
+            this.miniMap.show(); // Make it visible
+        } else {
+            console.error("Failed to initialize MiniMap: Required components missing.");
+        }
     }
 
     update(time, delta) {
@@ -389,30 +409,36 @@ export default class GameScreen extends Phaser.Scene {
         this.worldManager.update(this.player.x, this.player.y);
 
         // --- Update UI ---
-        if (this.plasmaCounterText && this.player) {
-            this.plasmaCounterText.setText(`Plasma: ${this.player.plasmaCount}`);
+        // Update HTML Plasma Counter
+        if (this.plasmaCountElement && this.player) {
+            this.plasmaCountElement.innerText = this.player.plasmaCount; // Update only the number
         }
-        // --- Health Bar Fill Update ---
-        if (this.healthBarFill && this.player) {
-            const healthBarWidth = 200; // Must match create()
-            const healthBarHeight = 20; // Must match create()
-            // Position health bar at absolute top-left (match create)
-            const healthBarX = 0;
-            const healthBarY = 0;
-
+        // --- HTML Health Bar Update ---
+        if (this.healthBarFillElement && this.player) {
             const hpPercent = Math.max(0, this.player.health / this.player.maxHealth);
-            const currentHealthWidth = healthBarWidth * hpPercent;
-
-            this.healthBarFill.clear();
-            // Set gradient fill style (Bright Red left to Dark Red right)
-            this.healthBarFill.fillGradientStyle(0xff0000, 0xff6666, 0xff0000, 0xff6666, 1); // Bright Red to Lighter Red
-            // Draw the rectangle with the current health width
-            if (currentHealthWidth > 0) { // Avoid drawing zero-width rect
-                 this.healthBarFill.fillRect(healthBarX, healthBarY, currentHealthWidth, healthBarHeight); // Draw fill at top-left
-            }
+            const widthPercentage = hpPercent * 100;
+            this.healthBarFillElement.style.width = `${widthPercentage}%`;
         }
-        if (this.tileCoordsText && this.player) {
-            this.tileCoordsText.setText(`Tile: ${this.player.currentTileX}, ${this.player.currentTileY}`);
+        // --- End HTML Health Bar Update ---
+
+
+
+
+
+
+
+
+// Removed: Update Phaser Tile Coordinates Text (moved to HTML)
+
+// --- Update HTML Tile Coordinates ---
+if (this.tileCoordsElement && this.player) {
+    this.tileCoordsElement.innerText = `Tile: ${this.player.currentTileX}, ${this.player.currentTileY}`;
+}
+// --- End Update HTML Tile Coordinates ---
+
+        // --- Update MiniMap ---
+        if (this.miniMap) {
+            this.miniMap.update();
         }
     }
 // End of update method (Class continues below)
@@ -445,6 +471,11 @@ handlePlayerDeath() {
     if (this.playerShadow) {
         this.playerShadow.setVisible(false);
     }
+    // Hide HTML UI elements on death
+    if (this.healthBarContainerElement) this.healthBarContainerElement.style.display = 'none';
+    if (this.plasmaCounterContainerElement) this.plasmaCounterContainerElement.style.display = 'none';
+    if (this.miniMap) this.miniMap.hide(); // Use MiniMap's hide method
+    if (this.tileCoordsElement) this.tileCoordsElement.style.display = 'none'; // Hide coords
 
     // Create Respawn Button
     this.respawnButton = this.add.text(this.cameras.main.centerX, this.cameras.main.centerY + 50, 'Respawn', {
@@ -557,9 +588,16 @@ respawnPlayer() { // No longer needs death location
         this.playerShadow.setVisible(true);
     }
 
+    // Show HTML UI elements on respawn
+    if (this.healthBarContainerElement) this.healthBarContainerElement.style.display = 'block';
+    if (this.plasmaCounterContainerElement) this.plasmaCounterContainerElement.style.display = 'flex'; // Use flex as per CSS
+    if (this.miniMap) this.miniMap.show(); // Use MiniMap's show method
+    if (this.tileCoordsElement) this.tileCoordsElement.style.display = 'block'; // Show coords
+
     // Update UI immediately
-    if (this.plasmaCounterText) {
-        this.plasmaCounterText.setText(`Plasma: ${this.player.plasmaCount}`);
+    // Update HTML Plasma Counter
+    if (this.plasmaCountElement) {
+        this.plasmaCountElement.innerText = this.player.plasmaCount; // Update only the number
     }
     if (this.playerHpText) {
          this.playerHpText.setText(`HP: ${this.player.health}/${this.player.maxHealth}`);
@@ -585,6 +623,11 @@ respawnPlayer() { // No longer needs death location
     }
 
     console.log("GameScreen: Player respawned.");
+}
+
+// Method for MiniMap to get plasma items
+getPlasmas() {
+    return this.items.filter(item => item instanceof Plasma);
 }
 
 
@@ -896,6 +939,17 @@ createOrUpdateStunEffect(enemy) {
 
 
     shutdown() {
+        console.log("Shutting down GameScreen..."); // Added console log back for consistency
+
+        // Hide the HTML health bar when the scene shuts down
+        if (this.healthBarContainerElement) {
+            this.healthBarContainerElement.style.display = 'none';
+        }
+        // Hide the HTML plasma counter when the scene shuts down
+        if (this.plasmaCounterContainerElement) {
+            this.plasmaCounterContainerElement.style.display = 'none';
+        }
+
         // Destroy InputHandler to remove listeners
         if (this.inputHandler) {
             this.inputHandler.destroy();
@@ -911,6 +965,17 @@ createOrUpdateStunEffect(enemy) {
         if (this.enemyManager) {
             this.enemyManager.destroy();
             this.enemyManager = null;
+        }
+
+        // Clean up MiniMap
+        if (this.miniMap) {
+            this.miniMap.hide();
+            this.miniMap.clearAllDots(); // Ensure all DOM elements are removed
+            this.miniMap = null;
+        }
+        // Hide coords on shutdown
+        if (this.tileCoordsElement) {
+             this.tileCoordsElement.style.display = 'none';
         }
 
         // Release references

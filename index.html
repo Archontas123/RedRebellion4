@@ -5,14 +5,160 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Phaser Game</title>
     <style>
-        body { margin: 0; padding: 0; background-color: #000; }
+        body { margin: 0; padding: 0; background-color: #000; overflow: hidden; /* Prevent scrollbars */ }
         canvas { display: block; } /* Remove margin: auto */
-        #phaser-game { width: 100vw; height: 100vh; } /* Make container fill viewport */
+        #phaser-game { width: 100vw; height: 100vh; position: relative; /* Needed for absolute positioning of children */ }
+
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* Allow clicks to pass through to the game */
+            z-index: 10; /* Ensure UI is above the canvas */
+        }
+
+        #health-bar-container {
+            position: absolute;
+            top: 10px; /* Adjust position as needed */
+            left: 10px; /* Adjust position as needed */
+            width: 200px; /* Match JS width */
+            height: 20px;  /* Match JS height */
+            border: 2px solid white;
+            background-color: rgba(50, 50, 50, 0.7); /* Optional background */
+            display: none; /* Hide by default */
+            box-sizing: border-box; /* Include border in width/height */
+        }
+
+        #health-bar-fill {
+            width: 100%; /* Start full */
+            height: 100%;
+            background: linear-gradient(to right, #ff0000, #ff6666); /* Red gradient */
+            transition: width 0.1s linear; /* Smooth transition */
+        }
+
+        /* Mini Map */
+        #mini-map {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 180px;
+            height: 180px;
+            background-color: rgba(0, 0, 0, 0.5);
+            border-radius: 5px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            overflow: hidden;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.7);
+            display: none; /* Hide by default until game starts */
+        }
+
+        #mini-map-content {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            /* Represents the game world area */
+            background-color: #3c2210; /* Default terrain color */
+        }
+
+        /* Removed .map-terrain as #mini-map-content serves this purpose */
+
+        .map-region { /* Example for potential future use */
+            position: absolute;
+            border-radius: 2px;
+            background-color: rgba(100, 100, 100, 0.4); /* Example region color */
+        }
+
+        .map-dot { /* Generic class for map icons */
+             position: absolute;
+             border-radius: 50%;
+             transform: translate(-50%, -50%); /* Center the dot on its coordinates */
+        }
+
+        .map-player {
+            width: 8px;
+            height: 8px;
+            background-color: #00ff00;
+            z-index: 10;
+            box-shadow: 0 0 4px #00ff00;
+        }
+
+        .map-enemy {
+            width: 5px;
+            height: 5px;
+            background-color: #ff0000;
+            z-index: 9;
+        }
+
+        .map-plasma {
+            width: 4px;
+            height: 4px;
+            background-color: #00ffff;
+            z-index: 8;
+            box-shadow: 0 0 3px #00ffff;
+        }
+
+        #plasma-counter {
+            position: absolute;
+            top: 40px;    /* Position below health bar (10px top + 20px height + 4px border + 6px spacing) */
+            left: 10px;   /* Align with health bar */
+            color: #00ffff; /* Cyan color like the map dot */
+            font-size: 24px;
+            font-family: 'Arial', sans-serif;
+            text-shadow: 0 0 5px #00ffff;
+            /* display: flex; */ /* Flex is set by JS when shown */
+            display: none; /* Hide by default */
+            align-items: center; /* Vertically align icon and number */
+        }
+
+        #plasma-icon {
+            display: inline-block;
+            width: 18px; /* Adjust size as needed */
+            height: 18px;
+            background-color: #00ffff; /* Simple cyan square icon */
+            border-radius: 3px; /* Slightly rounded corners */
+            margin-right: 8px; /* Space between icon and number */
+            box-shadow: 0 0 4px #00ffff;
+        }
+
+        #tile-coords-display {
+            position: absolute;
+            top: 210px; /* mini-map top (20px) + height (180px) + 10px spacing */
+            right: 20px; /* Align with mini-map */
+            width: 180px; /* Match mini-map width */
+            color: #CCCCCC; /* Light gray like the old text */
+            font-size: 16px; /* Slightly smaller */
+            font-family: 'Arial', sans-serif;
+            text-shadow: 1px 1px 2px #000000; /* Simple shadow */
+            text-align: right; /* Align text to the right */
+            display: none; /* Hide by default */
+            pointer-events: none; /* Allow clicks through */
+            z-index: 10;
+        }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
     <script type="module" src="src/main.js"></script>
 </head>
 <body>
-    <div id="phaser-game"></div>
+    <div id="phaser-game">
+        <!-- Phaser canvas will be added here by the framework -->
+    </div>
+    <div id="ui-layer">
+        <div id="health-bar-container">
+            <div id="health-bar-fill"></div>
+        </div>
+        <!-- Other UI elements can go here -->
+        <div id="mini-map">
+            <div id="mini-map-content">
+                <!-- Dynamic content (player, enemies, etc.) will be added here via JS -->
+            </div>
+        </div>
+        <div id="plasma-counter">
+            <span id="plasma-icon"></span>
+            <span id="plasma-count">0</span> <!-- Separate span for the count -->
+        </div>
+        <div id="tile-coords-display">Tile: 0, 0</div> <!-- Add coordinate display element -->
+    </div>
+    </div>
 </body>
 </html>
