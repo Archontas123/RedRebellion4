@@ -44,7 +44,7 @@ export class Player extends Entity {
         this.dashDistanceTraveled = 0;
 
         // Attack properties
-        this.attackPower = options.attackPower || 12; // Updated damage
+        this.attackPower = options.attackPower || 1; // Updated damage
         this.lungeSpeed = this.moveSpeed * 3; // Slightly slower than dash
         this.lungeDistance = 3 * (options.tileSize || 50); // 3 tiles
         this.lungeDuration = 0.2; // in seconds
@@ -395,7 +395,8 @@ handleCollision(otherEntity) {
     // --- Lunge Attack Collision ---
     if (this.isAttacking) {
         console.log(`Player attacking, collided with: ${otherEntity?.id} (Type: ${otherEntity?.type})`);
-        if (otherEntity?.type === 'enemy') {
+        // Check if the other entity is any type of enemy
+        if (otherEntity?.type === 'enemy' || otherEntity?.type === 'ranged_enemy') {
              console.log(`>>> Enemy collision detected during attack! Applying effects to ${otherEntity.id}`);
              // Ensure enemy is not already dead AND hasn't been hit by this attack yet
              if (otherEntity.state !== 'dead' && !this.enemiesHitThisAttack.has(otherEntity.id)) {

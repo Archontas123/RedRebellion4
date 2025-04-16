@@ -5,7 +5,7 @@ export class Enemy extends Entity {
         // Default enemy options
         const enemyOptions = {
             type: 'enemy',
-            maxHealth: options.maxHealth || 500,
+            maxHealth: options.maxHealth || 2,
             friction: options.friction || 0.9, // Moderate friction
             collisionBounds: options.collisionBounds || { x: 0, y: 0, width: 40, height: 40 }, // Slightly smaller than player
             ...options,
@@ -15,7 +15,9 @@ export class Enemy extends Entity {
 
         // Enemy specific properties
         this.targetPlayer = null; // Reference to player entity
-        this.detectionRange = options.detectionRange || 600; // How far it can see the player
+        this.scene = options.scene || null; // Store scene reference if provided
+        this.detectionRange = options.detectionRange || 600; // How far it can *visually* detect the player (kept for potential future use)
+        this.agroRange = 80 * 50; // 80 tiles * 50 pixels/tile = 4000 pixels
         this.moveSpeed = options.moveSpeed || 80; // Slower than player
         this.aggressiveness = options.aggressiveness || 0.7; // How likely to pursue player (0-1)
         this.wanderSpeed = this.moveSpeed * 0.5; // Speed while wandering
@@ -32,6 +34,10 @@ export class Enemy extends Entity {
         this.idleTimer = 0;
         this.idleDuration = 0;
 
+        // Separation behavior
+        this.separationRadius = 50; // How close enemies need to be to push each other
+        this.separationForce = 100; // Strength of the separation push
+
         // Visual effects
         this.isFlashing = false; // Track if currently in hit flash state
         this.hitEffectTimer = 0;
@@ -40,6 +46,19 @@ export class Enemy extends Entity {
         // Stunned visual effect enhancements
         this.stunEffectIntensity = 1.0; // Full intensity effect when first stunned
         this.stunEffectDecayRate = 0.8; // How quickly effect fades
+
+        // Friendly Fire Avoidance
+        this.avoidanceRadius = 100; // How close a projectile needs to be to trigger avoidance
+        this.avoidancePredictionTime = 0.2; // How far ahead to predict collision (seconds)
+        this.avoidanceForce = 150; // Strength of the dodging push
+        this.avoidanceCooldown = 0.1; // Short cooldown after dodging
+        this.avoidanceTimer = 0;
+
+        // Flanking behavior
+        this.flankDirection = (Math.random() < 0.5) ? -1 : 1; // -1 for left, 1 for right relative to player
+        this.flankOffsetDistance = 150; // Pixels to offset for flanking
+        this.flankUpdateTimer = 0;
+        this.flankUpdateInterval = 1.0 + Math.random(); // Re-evaluate flank side every 1-2 seconds
     }
 
     update(deltaTime, worldContext) {
@@ -67,6 +86,14 @@ export class Enemy extends Entity {
             }
         }
 
+        // Update avoidance cooldown timer
+        if (this.avoidanceTimer > 0) {
+            this.avoidanceTimer -= deltaTime;
+            if (this.avoidanceTimer < 0) {
+                this.avoidanceTimer = 0;
+            }
+        }
+
         // If stunned, just update stun-related effects and parent state
         if (this.isStunned) {
             // Decay stun effect intensity for visual fade-out
@@ -78,11 +105,20 @@ export class Enemy extends Entity {
             return;
         }
 
-        // Decision making - only if not stunned
+        // Decision making & Flank Update - only if not stunned
         this.decisionTimer += deltaTime;
+        this.flankUpdateTimer += deltaTime;
+
         if (this.decisionTimer >= this.decisionInterval) {
             this.decisionTimer = 0;
             this.makeDecision();
+        }
+
+        // Periodically update flank direction preference
+        if (this.flankUpdateTimer >= this.flankUpdateInterval) {
+            this.flankUpdateTimer = 0;
+            this.flankDirection = (Math.random() < 0.5) ? -1 : 1; // Re-roll flank side
+            this.flankUpdateInterval = 1.0 + Math.random(); // Reset interval
         }
 
         // Execute current behavior
@@ -93,10 +129,121 @@ export class Enemy extends Entity {
         } else if (this.state === 'idle') {
             this.idle(deltaTime);
         }
+// --- Separation Calculation ---
+let separationX = 0;
+let separationY = 0;
+if (worldContext && worldContext.enemies && this.state !== 'wandering' && this.state !== 'idle') { // Don't separate when wandering/idle
+    worldContext.enemies.forEach(otherEnemy => {
+        if (otherEnemy !== this && otherEnemy.state !== 'dead') {
+            const dx = this.x - otherEnemy.x;
+            const dy = this.y - otherEnemy.y;
+            const distanceSq = dx * dx + dy * dy; // Use squared distance for efficiency
 
-        // Call parent update for physics, animation, etc.
-        super.update(deltaTime);
+            if (distanceSq > 0 && distanceSq < this.separationRadius * this.separationRadius) {
+                const distance = Math.sqrt(distanceSq);
+                const forceMagnitude = (this.separationRadius - distance) / this.separationRadius; // Stronger push when closer
+
+                // Direct separation force
+                const directForceX = (dx / distance) * forceMagnitude;
+                const directForceY = (dy / distance) * forceMagnitude;
+                separationX += directForceX;
+                separationY += directForceY;
+
+                // Tangential separation force (spreading) - perpendicular to direct force
+                const tangentialForceMagnitude = forceMagnitude * 0.3; // Adjust multiplier for desired spread strength
+                const tangentialForceX = -directForceY * tangentialForceMagnitude; // Use perpendicular vector (-y, x)
+                const tangentialForceY = directForceX * tangentialForceMagnitude;
+                separationX += tangentialForceX;
+                separationY += tangentialForceY;
+            }
+        }
+    });
+}
+
+// Normalize separation vector if needed (optional, depends on desired strength)
+const separationLength = Math.sqrt(separationX * separationX + separationY * separationY);
+if (separationLength > 0) {
+     // Apply separation force directly to velocity (can be adjusted)
+     // We add it here so it combines with pursue/wander velocity before the parent update applies physics
+     this.velocityX += (separationX / separationLength) * this.separationForce * deltaTime;
+     this.velocityY += (separationY / separationLength) * this.separationForce * deltaTime;
+     // console.log(`Enemy ${this.id} applying separation: (${(separationX / separationLength).toFixed(2)}, ${(separationY / separationLength).toFixed(2)})`);
+}
+// --- End Separation ---
+
+// --- Friendly Fire Avoidance ---
+let avoidanceX = 0;
+let avoidanceY = 0;
+if (worldContext && worldContext.projectiles && this.avoidanceTimer <= 0 && this.state !== 'stunned' && this.state !== 'dead') {
+    worldContext.projectiles.forEach(proj => {
+        // Check if it's an enemy projectile, not owned by self, and still active
+        if (proj.type === 'enemy_projectile' && proj.ownerId !== this.id && proj.state !== 'dead') {
+            const dx = proj.x - this.x;
+            const dy = proj.y - this.y;
+            const distanceSq = dx * dx + dy * dy;
+
+            // Check if projectile is within avoidance radius
+            if (distanceSq < this.avoidanceRadius * this.avoidanceRadius) {
+                // Predict future positions
+                const predictTime = this.avoidancePredictionTime;
+                const futureProjX = proj.x + proj.velocityX * predictTime;
+                const futureProjY = proj.y + proj.velocityY * predictTime;
+                const futureEnemyX = this.x + this.velocityX * predictTime; // Use current velocity for prediction
+                const futureEnemyY = this.y + this.velocityY * predictTime;
+
+                // Simple future collision check (using enemy bounds)
+                const enemyBounds = this.getAbsoluteBounds(); // Get current bounds
+                const futureEnemyLeft = futureEnemyX - enemyBounds.width / 2;
+                const futureEnemyRight = futureEnemyX + enemyBounds.width / 2;
+                const futureEnemyTop = futureEnemyY - enemyBounds.height / 2;
+                const futureEnemyBottom = futureEnemyY + enemyBounds.height / 2;
+
+                // Check if predicted projectile position is within predicted enemy bounds
+                if (futureProjX > futureEnemyLeft && futureProjX < futureEnemyRight &&
+                    futureProjY > futureEnemyTop && futureProjY < futureEnemyBottom)
+                {
+                    // Collision predicted! Calculate avoidance direction (perpendicular to projectile velocity)
+                    const projVelLen = Math.sqrt(proj.velocityX * proj.velocityX + proj.velocityY * proj.velocityY);
+                    if (projVelLen > 0) {
+                        // Perpendicular vectors: (-vy, vx) and (vy, -vx)
+                        // Choose the one that pushes away from the projectile's current position relative to the enemy
+                        const perp1X = -proj.velocityY / projVelLen;
+                        const perp1Y = proj.velocityX / projVelLen;
+                        const perp2X = proj.velocityY / projVelLen;
+                        const perp2Y = -proj.velocityX / projVelLen;
+
+                        // Dot product to check which perpendicular is further from the projectile direction (dx, dy)
+                        const dot1 = perp1X * dx + perp1Y * dy;
+                        const dot2 = perp2X * dx + perp2Y * dy;
+
+                        if (dot1 > dot2) { // Push in direction of perp1
+                            avoidanceX += perp1X;
+                            avoidanceY += perp1Y;
+                        } else { // Push in direction of perp2
+                            avoidanceX += perp2X;
+                            avoidanceY += perp2Y;
+                        }
+                        this.avoidanceTimer = this.avoidanceCooldown; // Start cooldown
+                        // console.log(`Enemy ${this.id} avoiding projectile ${proj.id}`); // Debug
+                    }
+                }
+            }
+        }
+    });
+
+    // Apply avoidance force if needed
+    const avoidanceLength = Math.sqrt(avoidanceX * avoidanceX + avoidanceY * avoidanceY);
+    if (avoidanceLength > 0) {
+        // Add avoidance velocity directly (will be applied by super.update)
+        this.velocityX += (avoidanceX / avoidanceLength) * this.avoidanceForce * deltaTime;
+        this.velocityY += (avoidanceY / avoidanceLength) * this.avoidanceForce * deltaTime;
     }
+}
+// --- End Friendly Fire Avoidance ---
+
+// Call parent update for physics, animation, etc. (applies velocity including separation and avoidance)
+super.update(deltaTime);
+}
 
     makeDecision() {
         // Don't make decisions if stunned or dead
@@ -109,7 +256,8 @@ export class Enemy extends Entity {
             const distanceToPlayer = Math.sqrt(dx * dx + dy * dy);
 
             // If player is in range, decide whether to pursue based on aggressiveness
-            if (distanceToPlayer <= this.detectionRange) {
+            // Agro check: If player is within the agro range
+            if (distanceToPlayer <= this.agroRange) {
                 if (Math.random() < this.aggressiveness) {
                     this.setState('pursuing');
                     return;
@@ -185,7 +333,8 @@ export class Enemy extends Entity {
         const distance = Math.sqrt(dx * dx + dy * dy);
 
         // If player moved out of range, stop pursuing
-        if (distance > this.detectionRange * 1.2) { // Add 20% buffer to avoid oscillation
+        // Stop pursuing if player moves significantly outside the agro range
+        if (distance > this.agroRange * 1.1) { // Add 10% buffer to avoid oscillation
             this.startWandering();
             return;
         }
@@ -194,18 +343,55 @@ export class Enemy extends Entity {
         // Assuming both player and enemy are roughly 40 units wide/tall
         const minDistance = 40; // Stop when centers are this close
 
-        // Normalize direction and apply velocity only if further than minDistance
-        if (distance > minDistance) { // Check if further than minimum distance
-            const normalizedX = dx / distance;
+        // --- Flanking and Movement Logic ---
+        if (distance > minDistance) { // Only move if not too close
+            const normalizedX = dx / distance; // Direction directly TO player
             const normalizedY = dy / distance;
 
-            this.velocityX = normalizedX * this.moveSpeed;
-            this.velocityY = normalizedY * this.moveSpeed;
+            // Calculate perpendicular direction for flanking
+            const perpX = -normalizedY;
+            const perpY = normalizedX;
+
+            // Calculate the target flanking position
+            const flankTargetX = this.targetPlayer.x + perpX * this.flankDirection * this.flankOffsetDistance;
+            const flankTargetY = this.targetPlayer.y + perpY * this.flankDirection * this.flankOffsetDistance;
+
+            // Calculate direction vector from enemy to the flank target position
+            const flankDx = flankTargetX - this.x;
+            const flankDy = flankTargetY - this.y;
+            const flankDist = Math.sqrt(flankDx * flankDx + flankDy * flankDy);
+
+            // Normalize the direction vector towards the flank target
+            let finalMoveX = normalizedX; // Default to direct pursuit if already at flank point or very close
+            let finalMoveY = normalizedY;
+            if (flankDist > 10) { // Only use flank direction if not already there (add tolerance)
+                 finalMoveX = flankDx / flankDist;
+                 finalMoveY = flankDy / flankDist;
+            }
+
+            // Combine direct pursuit tendency with flanking tendency (e.g., 70% flank, 30% direct)
+            const flankWeight = 0.7;
+            const combinedMoveX = finalMoveX * flankWeight + normalizedX * (1 - flankWeight);
+            const combinedMoveY = finalMoveY * flankWeight + normalizedY * (1 - flankWeight);
+
+            // Normalize the combined direction
+            const combinedLength = Math.sqrt(combinedMoveX * combinedMoveX + combinedMoveY * combinedMoveY);
+            const finalCombinedX = (combinedLength > 0) ? combinedMoveX / combinedLength : normalizedX;
+            const finalCombinedY = (combinedLength > 0) ? combinedMoveY / combinedLength : normalizedY;
+
+
+            // Set base velocity towards the calculated flanking direction
+            // Separation and avoidance forces will modify this later in the update loop
+            this.velocityX = finalCombinedX * this.moveSpeed;
+            this.velocityY = finalCombinedY * this.moveSpeed;
+
         } else {
-            // If too close, stop moving towards the player
+            // If too close, stop base movement.
+            // Separation/Avoidance forces might still apply.
             this.velocityX = 0;
             this.velocityY = 0;
         }
+        // --- End Flanking and Movement Logic ---
     }
 
     // Override takeDamage to add hit effects
@@ -234,6 +420,12 @@ export class Enemy extends Entity {
             if (this.damageCooldownTimer <= 0 && this.state !== 'dead' && !this.isStunned) {
                 console.log(`>>> Enemy ${this.id} applying ${this.damageAmount} damage to player ${otherEntity.id}`);
                 otherEntity.takeDamage(this.damageAmount); // Apply damage to the player
+                // Trigger visual effect on successful hit
+                if (this.scene && typeof this.scene.createMeleeHitEffect === 'function') {
+                    this.scene.createMeleeHitEffect(this.x, this.y); // Use enemy position for effect origin
+                } else {
+                     console.warn(`Enemy ${this.id}: Scene or createMeleeHitEffect method not found!`);
+                }
                 this.damageCooldownTimer = this.damageCooldown; // Reset cooldown
             }
             // Note: Player's attack collision logic is handled in Player.js handleCollision

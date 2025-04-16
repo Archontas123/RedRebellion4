@@ -1,12 +1,13 @@
 import { Enemy } from './Enemy.js';
+import { RangedEnemy } from './RangedEnemy.js'; // Import the RangedEnemy class
 
 export class EnemyManager {
     constructor(scene) {
         this.scene = scene;
         this.enemies = []; // Local reference to enemies
-        this.maxEnemies = 10; // Maximum enemies to spawn
+        this.maxEnemies = 50; // Maximum enemies to spawn
         this.spawnTimer = 0;
-        this.spawnInterval = 2; // Seconds between spawns
+        this.spawnInterval = 10; // Seconds between spawns (now spawns squads)
         this.spawnDistance = { min: 200, max: 500 }; // Distance range from player
         this.worldBounds = {
             width: 5000,
@@ -27,51 +28,84 @@ export class EnemyManager {
 
         // Spawn a new enemy when timer expires
         if (this.spawnTimer >= this.spawnInterval) {
-            this.spawnTimer = 0;
-            this.spawnRandomEnemy();
+            this.spawnTimer = 0; // Reset timer
+            this.spawnSquad(); // Spawn a squad instead of a single enemy
         }
     }
 
-    spawnRandomEnemy() {
-        // Check that we have access to the player
-        if (!this.scene.player) {
-            console.log("Cannot spawn enemy: Player not found");
-            return;
+    spawnSquad() {
+        // Determine squad size (5-8 enemies)
+        const squadSize = 5 + Math.floor(Math.random() * 4); // 5 + (0 to 3)
+
+        // Calculate a random center point for the squad within world bounds
+        // Ensure the center is not too close to the edge to avoid immediate out-of-bounds spawns
+        const padding = 100; // Padding from world edges
+        const minX = this.worldBounds.centerX - this.worldBounds.width / 2 + padding;
+        const maxX = this.worldBounds.centerX + this.worldBounds.width / 2 - padding;
+        const minY = this.worldBounds.centerY - this.worldBounds.height / 2 + padding;
+        const maxY = this.worldBounds.centerY + this.worldBounds.height / 2 - padding;
+
+        const squadCenterX = minX + Math.random() * (maxX - minX);
+        const squadCenterY = minY + Math.random() * (maxY - minY);
+
+        console.log(`Spawning squad of ${squadSize} near (${squadCenterX.toFixed(0)}, ${squadCenterY.toFixed(0)})`);
+
+        // Spawn each enemy in the squad with slight position variations
+        const squadSpawnRadius = 50; // Max distance from squad center
+        for (let i = 0; i < squadSize; i++) {
+            // Check if we've hit the max enemy limit during squad spawning
+            if (this.scene.enemies.length >= this.maxEnemies) {
+                console.log("Max enemy limit reached during squad spawn.");
+                break; // Stop spawning this squad
+            }
+
+            const angle = Math.random() * Math.PI * 2;
+            const radius = Math.random() * squadSpawnRadius;
+            const spawnX = squadCenterX + Math.cos(angle) * radius;
+            const spawnY = squadCenterY + Math.sin(angle) * radius;
+
+            // Ensure spawn position is within world bounds (though center calculation helps)
+            const clampedX = Phaser.Math.Clamp(spawnX, minX - padding, maxX + padding);
+            const clampedY = Phaser.Math.Clamp(spawnY, minY - padding, maxY + padding);
+
+
+            this.spawnEnemy(clampedX, clampedY);
         }
-
-        // Get player position
-        const playerX = this.scene.player.x;
-        const playerY = this.scene.player.y;
-
-        // Choose a random distance from min-max range
-        const spawnDistance = this.spawnDistance.min + Math.random() * (this.spawnDistance.max - this.spawnDistance.min);
-
-        // Choose a random angle
-        const angle = Math.random() * Math.PI * 2;
-
-        // Calculate spawn position
-        const spawnX = playerX + Math.cos(angle) * spawnDistance;
-        const spawnY = playerY + Math.sin(angle) * spawnDistance;
-
-        // Create the enemy
-        this.spawnEnemy(spawnX, spawnY);
     }
 
     spawnEnemy(x, y) {
-        console.log(`Spawning enemy at ${x.toFixed(0)}, ${y.toFixed(0)}`);
+        let enemy;
+        const enemyTypeRoll = Math.random(); // Roll for enemy type
 
-        // Random enemy properties
+        // Random base properties (can be adjusted per type)
         const enemySize = 30 + Math.floor(Math.random() * 20); // 30-50px
-        const enemySpeed = 60 + Math.floor(Math.random() * 60); // 60-120 speed
-        const enemyHealth = 30 + Math.floor(Math.random() * 50); // 30-80 health
+        const collisionBounds = { x: 0, y: 0, width: enemySize, height: enemySize };
 
-        // Create enemy with randomized properties
-        const enemy = new Enemy(x, y, {
-            maxHealth: enemyHealth,
-            moveSpeed: enemySpeed,
-            collisionBounds: { x: 0, y: 0, width: enemySize, height: enemySize },
-            aggressiveness: 0.5 + Math.random() * 0.5 // 0.5-1.0 aggressiveness
-        });
+        if (enemyTypeRoll < 0.25) { // 25% chance to spawn a RangedEnemy
+            console.log(`Spawning RangedEnemy at ${x.toFixed(0)}, ${y.toFixed(0)}`);
+            enemy = new RangedEnemy(x, y, {
+                // RangedEnemy specific options (can use defaults or customize)
+                // maxHealth: 35, // Example: Use default from RangedEnemy class
+                // moveSpeed: 60, // Example: Use default
+                collisionBounds: collisionBounds,
+                // attackRange: 250, // Example: Use default
+                // attackCooldown: 2.0, // Example: Use default
+                // projectileSpeed: 300, // Example: Use default
+                scene: this.scene // Pass scene reference
+            });
+        } else { // 75% chance to spawn a base Enemy
+            console.log(`Spawning base Enemy at ${x.toFixed(0)}, ${y.toFixed(0)}`);
+            const enemySpeed = 60 + Math.floor(Math.random() * 60); // 60-120 speed
+            const enemyHealth = 2; // Set health to 2
+            enemy = new Enemy(x, y, {
+                maxHealth: enemyHealth,
+                moveSpeed: enemySpeed,
+                collisionBounds: collisionBounds,
+                aggressiveness: 0.5 + Math.random() * 0.5, // 0.5-1.0 aggressiveness
+                scene: this.scene // Pass scene reference
+            });
+        }
+
 
         // Add to both the local and scene enemy arrays
         this.enemies.push(enemy);

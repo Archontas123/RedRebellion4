@@ -149,6 +149,45 @@ export default class WorldManager {
     }
 
     /**
+     * Calculates the approximate world boundaries based on currently loaded chunks.
+     * @returns {{minX: number, minY: number, maxX: number, maxY: number, centerX: number, centerY: number, width: number, height: number} | null}
+     *          An object representing the bounds, or null if no chunks are loaded.
+     */
+    getLoadedBounds() {
+        const keys = Object.keys(this.loadedChunks);
+        if (keys.length === 0) {
+            return null; // No chunks loaded
+        }
+
+        let minChunkX = Infinity, maxChunkX = -Infinity;
+        let minChunkY = Infinity, maxChunkY = -Infinity;
+
+        keys.forEach(key => {
+            const [chunkX, chunkY] = key.split(',').map(Number);
+            minChunkX = Math.min(minChunkX, chunkX);
+            maxChunkX = Math.max(maxChunkX, chunkX);
+            minChunkY = Math.min(minChunkY, chunkY);
+            maxChunkY = Math.max(maxChunkY, chunkY);
+        });
+
+        // Calculate world coordinates (pixel boundaries)
+        const minX = minChunkX * this.chunkSize * this.tileSize;
+        const minY = minChunkY * this.chunkSize * this.tileSize;
+        // Add 1 because the max chunk coordinate refers to the top-left corner of that chunk
+        const maxX = (maxChunkX + 1) * this.chunkSize * this.tileSize;
+        const maxY = (maxChunkY + 1) * this.chunkSize * this.tileSize;
+
+        const width = maxX - minX;
+        const height = maxY - minY;
+        const centerX = minX + width / 2;
+        const centerY = minY + height / 2;
+
+
+        return { minX, minY, maxX, maxY, centerX, centerY, width, height };
+    }
+
+
+    /**
      * Destroys the world manager and all loaded chunks.
      */
     destroy() {

@@ -1,18 +1,19 @@
 // src/entities/RangedEnemy.js
 import { Enemy } from './Enemy.js';
+import { Entity } from './Entity.js'; // Import the base Entity class
 
 export class RangedEnemy extends Enemy {
     constructor(x, y, options = {}) {
         // Default ranged enemy options, extending base enemy options
         const rangedOptions = {
-            maxHealth: options.maxHealth || 35, // Ranged enemies might be less tanky
+            maxHealth: options.maxHealth || 2, // Ranged enemies might be less tanky
             moveSpeed: options.moveSpeed || 60, // Slightly slower maybe
-            detectionRange: options.detectionRange || 400, // Can see further
-            attackRange: options.attackRange || 250, // Preferred distance to shoot from
+            detectionRange: options.detectionRange || 600, // Increased detection range
+            attackRange: options.attackRange || 700, // Increased attack range (now 700px)
             attackCooldown: options.attackCooldown || 2.0, // Time between shots (seconds)
             attackPower: options.attackPower || 10, // Damage per shot
             projectileSpeed: options.projectileSpeed || 300, // Speed of the projectile
-            retreatDistance: options.retreatDistance || 150, // Minimum distance to keep from player
+            retreatDistance: options.retreatDistance || 300, // Increased retreat distance
             ...options, // Allow overriding defaults
             type: 'ranged_enemy', // Specific type identifier
         };
@@ -24,25 +25,31 @@ export class RangedEnemy extends Enemy {
         this.attackCooldown = rangedOptions.attackCooldown;
         this.attackPower = rangedOptions.attackPower;
         this.projectileSpeed = rangedOptions.projectileSpeed;
-        this.retreatDistance = rangedOptions.retreatDistance; // Minimum distance
+        this.retreatDistance = rangedOptions.retreatDistance; // Minimum distance to stay away normally
+        this.smokeBombRange = rangedOptions.smokeBombRange || 150; // Closer distance to trigger smoke bomb
+        this.smokeBombCooldown = rangedOptions.smokeBombCooldown || 10.0; // Cooldown in seconds
+        this.smokeBombTeleportDist = rangedOptions.smokeBombTeleportDist || 250; // How far to teleport
 
         this.attackTimer = 0; // Timer for attack cooldown
         this.isAttacking = false; // Flag if currently performing attack animation/action
         this.attackDuration = 0.3; // How long the attack animation/pause takes
         this.attackActionTimer = 0; // Timer for the attack action itself
+        this.smokeBombTimer = 0; // Timer for smoke bomb cooldown
     }
 
     update(deltaTime, worldContext) {
         if (this.state === 'dead') return;
-        
-        // Store scene reference if available (needed for firing projectiles)
-        if (worldContext && worldContext.scene && !this.scene) {
-            this.scene = worldContext.scene;
-        }
+
+        // Scene reference is now set in the base Enemy constructor
+        // No need to assign it here anymore
 
         // Update attack cooldown timer
         if (this.attackTimer > 0) {
             this.attackTimer -= deltaTime;
+        }
+        // Update smoke bomb cooldown timer
+        if (this.smokeBombTimer > 0) {
+            this.smokeBombTimer -= deltaTime;
         }
 
         // Update attack action timer
@@ -62,6 +69,8 @@ export class RangedEnemy extends Enemy {
         }
 
         // Base enemy update handles stun checks, target acquisition, hit effects, decision timer
+        // Base enemy update handles stun checks, target acquisition, hit effects, decision timer
+        // It might call makeDecision -> startAttack -> fireProjectile, so scene must be set *before* this
         super.update(deltaTime, worldContext);
 
         // Ranged enemy specific AI logic (only if not stunned and not in attack action)
@@ -78,17 +87,22 @@ export class RangedEnemy extends Enemy {
             const dy = this.targetPlayer.y - this.y;
             const distanceToPlayer = Math.sqrt(dx * dx + dy * dy);
 
-            // 1. Attack Check: If in range and cooldown ready
+            // 1. Smoke Bomb Check: If player is too close and ability ready
+            if (distanceToPlayer < this.smokeBombRange && this.smokeBombTimer <= 0) {
+                this.useSmokeBomb(dx / distanceToPlayer, dy / distanceToPlayer); // Pass direction *away* from player
+                return; // Prioritize smoke bomb
+            }
+
+            // 2. Attack Check: If in range (but not too close for smoke bomb) and cooldown ready
             if (distanceToPlayer <= this.attackRange && distanceToPlayer >= this.retreatDistance && this.attackTimer <= 0) {
                 this.startAttack();
                 return; // Prioritize attacking
             }
 
-            // 2. Pursue/Reposition Check: If player is detected
+            // 3. Pursue/Reposition Check: If player is detected (and not using smoke bomb or attacking)
             if (distanceToPlayer <= this.detectionRange) {
-                 // Always set state to pursuing if player is detected and not attacking/stunned/dead
-                 // The pursuePlayer method will handle moving towards/away/stopping
-                 this.setState('pursuing'); 
+                 // Set state to pursuing; pursuePlayer handles moving towards/away/stopping
+                 this.setState('pursuing');
                  return;
             }
         }
@@ -135,8 +149,11 @@ export class RangedEnemy extends Enemy {
     // This method signals that a projectile should be created.
     // The actual creation logic will likely live in GameScreen or a ProjectileManager.
     fireProjectile(direction) {
-        // We need access to the scene or a projectile manager to actually create it
-        if (this.scene && this.scene.createProjectile) {
+        // DEBUG: Log the scene object right before attempting to use it
+        console.log(`DEBUG: RangedEnemy ${this.id} attempting fire. this.scene:`, this.scene);
+
+        // Check explicitly if this.scene exists and has the createProjectile method as a function
+        if (this.scene && typeof this.scene.createProjectile === 'function') {
              this.scene.createProjectile(
                 this.x, // Start position x
                 this.y, // Start position y
@@ -147,7 +164,12 @@ export class RangedEnemy extends Enemy {
                 'enemy_projectile' // Type identifier for the projectile
             );
         } else {
-            console.warn(`RangedEnemy ${this.id}: Cannot fire projectile - scene.createProjectile not found.`);
+            // More detailed warning if the check fails
+            console.warn(`RangedEnemy ${this.id}: Cannot fire projectile. Condition failed: (this.scene && typeof this.scene.createProjectile === 'function')`);
+            console.warn(`DEBUG: Value of this.scene:`, this.scene);
+            if(this.scene) {
+                 console.warn(`DEBUG: Value of typeof this.scene.createProjectile:`, typeof this.scene.createProjectile);
+            }
         }
     }
 
@@ -214,5 +236,37 @@ export class RangedEnemy extends Enemy {
         super.onDeath();
         // console.log(`RangedEnemy ${this.id} died!`); // Optional debug log
         // Cleanup specific to ranged enemies if any
+    }
+
+    useSmokeBomb(dirX, dirY) {
+        // dirX, dirY should be the normalized direction *away* from the player
+        console.log(`RangedEnemy ${this.id} used Smoke Bomb!`);
+
+        // Trigger the visual effect in the scene
+        if (this.scene && typeof this.scene.createSmokeBombEffect === 'function') {
+            this.scene.createSmokeBombEffect(this.x, this.y);
+        } else {
+            console.warn(`RangedEnemy ${this.id}: Scene or createSmokeBombEffect method not found!`);
+        }
+
+        // Calculate target teleport position
+        const targetX = this.x + dirX * this.smokeBombTeleportDist;
+        const targetY = this.y + dirY * this.smokeBombTeleportDist;
+
+        // TODO: Add collision check here with worldContext.worldManager.isSolid(targetX, targetY)
+        //       or find a nearby valid spot if the target is invalid.
+        //       For now, just teleport directly.
+
+        this.x = targetX;
+        this.y = targetY;
+
+        // Trigger cooldown
+        this.smokeBombTimer = this.smokeBombCooldown;
+
+        // Briefly stop movement or change state after teleporting?
+        this.velocityX = 0;
+        this.velocityY = 0;
+        this.setState('idle'); // Go idle briefly after teleporting
+        this.idleTimer = 0.5; // Idle for half a second
     }
 }

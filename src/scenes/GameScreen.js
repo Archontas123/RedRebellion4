@@ -6,6 +6,7 @@ import { Enemy } from '../entities/Enemy.js';
 import { EnemyManager } from '../entities/EnemyManager.js';
 import { Plasma } from '../entities/Plasma.js'; // Import Plasma
 import MiniMap from '../ui/MiniMap.js'; // Import MiniMap
+import { Projectile } from '../entities/Projectile.js'; // Import Projectile
 
 export default class GameScreen extends Phaser.Scene {
     constructor() {
@@ -31,6 +32,8 @@ export default class GameScreen extends Phaser.Scene {
         // Removed: this.tileCoordsText = null; // UI Text for player tile coordinates (moved to HTML)
         this.miniMap = null; // Instance of the MiniMap UI handler
         this.tileCoordsElement = null; // Reference to the HTML coordinate display element
+        this.projectiles = []; // Array to hold projectile instances
+        this.projectileVisuals = new Map(); // Map projectile ID to Phaser GameObject
     }
 
     preload() {
@@ -203,22 +206,39 @@ export default class GameScreen extends Phaser.Scene {
         // --- End Shadow Drawing ---
 
         // --- Update Enemy Manager ---
-        if (this.enemyManager) {
+        if (this.enemyManager && this.worldManager) {
+            // Get current loaded bounds from WorldManager
+            const currentBounds = this.worldManager.getLoadedBounds();
+            if (currentBounds) {
+                // Pass the dynamic bounds to the EnemyManager
+                this.enemyManager.setWorldBounds(currentBounds);
+            }
+            // Now update the EnemyManager, which will use the latest bounds for spawning
             this.enemyManager.update(dtSeconds);
         }
 
         // --- Update Enemies ---
+        // Prepare world context for enemies
+        const worldContext = {
+            player: this.player,
+            enemies: this.enemies,
+            projectiles: this.projectiles // Pass the projectiles list
+        };
+
         this.enemies.forEach(enemy => {
             if (enemy.state !== 'dead') { // Only update active enemies
-                enemy.update(dtSeconds, this);
+                // Pass the world context object to the enemy's update method
+                enemy.update(dtSeconds, worldContext);
 
                 // Ensure visual exists for active enemy
                 if (!this.enemyVisuals.has(enemy.id)) {
+                    // Determine color based on enemy type
+                    const enemyColor = (enemy.type === 'ranged_enemy') ? 0xffa500 : 0xff0000; // Orange for ranged, Red for others
                     const enemyVisual = this.add.rectangle(
                         enemy.x, enemy.y,
                         enemy.collisionBounds.width, // Use enemy's bounds
                         enemy.collisionBounds.height,
-                        0xff0000 // Red color for enemies
+                        enemyColor // Use determined color
                     );
                     enemyVisual.setDepth(0.95); // Slightly above shadow, below player
                     this.enemyVisuals.set(enemy.id, enemyVisual);
@@ -263,7 +283,20 @@ export default class GameScreen extends Phaser.Scene {
         // --- Update enemy visuals including stun effects ---
         this.updateEnemyVisuals();
 
-        // --- Collision Detection & Handling ---
+        // --- Update Projectiles ---
+        this.projectiles.forEach(projectile => {
+            projectile.update(dtSeconds);
+
+            // Sync visual position
+            const visual = this.projectileVisuals.get(projectile.id);
+            if (visual) {
+                visual.setPosition(projectile.x, projectile.y);
+            }
+        });
+        // --- End Update Projectiles ---
+
+        // --- Gameplay Collision Detection & Handling (Attacks, Damage, Pickups) ---
+        // Run this *before* physics resolution to ensure attacks register based on intended positions
         if (this.player.state !== 'dead') {
             this.enemies.forEach(enemy => {
                 if (enemy.state !== 'dead') {
@@ -296,8 +329,66 @@ export default class GameScreen extends Phaser.Scene {
             });
             // --- End Player-Item Collision Check ---
         }
-        // --- End Collision Detection ---
+        // --- End Player-Item Collision Check ---
 
+        // --- Projectile Collision Check ---
+        this.projectiles.forEach(projectile => {
+            if (projectile.state === 'dead') return; // Skip already dead projectiles
+
+            // Check against Player (if projectile owner is not player)
+            if (projectile.ownerId !== this.player.id && this.player.state !== 'dead') {
+                if (projectile.checkCollision(this.player, dtSeconds)) {
+                    console.log(`Projectile ${projectile.id} hit player ${this.player.id}`);
+                    this.player.takeDamage(projectile.damage);
+                    projectile.destroy(); // Mark projectile as dead using its destroy method
+                    // Optional: Create impact effect at player location
+                    this.createImpactEffect(this.player.x, this.player.y);
+                }
+            }
+
+            // Check against Enemies (if projectile owner is not the enemy itself)
+            this.enemies.forEach(enemy => {
+                if (projectile.state === 'dead') return; // Skip if projectile already hit something
+                // Additional check: Prevent enemy projectiles from hitting other enemies
+                const isEnemyProjectile = projectile.type === 'enemy_projectile';
+                const isTargetEnemy = (enemy.type === 'enemy' || enemy.type === 'ranged_enemy');
+
+                if (enemy.state !== 'dead' && projectile.ownerId !== enemy.id && !(isEnemyProjectile && isTargetEnemy)) {
+                    if (projectile.checkCollision(enemy, dtSeconds)) {
+                        console.log(`Projectile ${projectile.id} hit enemy ${enemy.id}`);
+                        enemy.takeDamage(projectile.damage);
+                        projectile.destroy(); // Mark projectile as dead using its destroy method
+                        // Optional: Create impact effect at enemy location
+                        this.createImpactEffect(enemy.x, enemy.y);
+                    }
+                }
+            });
+        });
+        // --- End Projectile Collision Check ---
+
+        // --- End Gameplay Collision Detection ---
+
+
+        // --- Physics Collision Resolution ---
+        // Resolve collisions after gameplay logic (like attacks) has been processed
+        const allEntities = [this.player, ...this.enemies].filter(e => e && e.state !== 'dead'); // Combine player and active enemies
+
+        // Iterate multiple times for stability (optional but recommended)
+        const resolutionIterations = 3;
+        for (let iter = 0; iter < resolutionIterations; iter++) {
+            for (let i = 0; i < allEntities.length; i++) {
+                for (let j = i + 1; j < allEntities.length; j++) {
+                    const entityA = allEntities[i];
+                    const entityB = allEntities[j];
+
+                    // Use checkCollision (AABB overlap)
+                    if (entityA.checkCollision(entityB, 0)) { // Pass 0 for deltaTime as we only check current overlap
+                        this.resolveCollision(entityA, entityB);
+                    }
+                }
+            }
+        }
+        // --- End Physics Collision Resolution ---
         // --- Update Items ---
         this.items.forEach(item => {
             item.update(dtSeconds); // Update item logic (e.g., bobbing)
@@ -404,6 +495,20 @@ export default class GameScreen extends Phaser.Scene {
             }
             return true; // Keep in items array
         });
+        // --- End Remove collected/dead items ---
+
+        // --- Remove dead projectiles ---
+        this.projectiles = this.projectiles.filter(projectile => {
+            if (projectile.state === 'dead') {
+                const visual = this.projectileVisuals.get(projectile.id);
+                if (visual) {
+                    visual.destroy();
+                    this.projectileVisuals.delete(projectile.id);
+                }
+                return false; // Remove from projectiles array
+            }
+            return true; // Keep in projectiles array
+        });
 
         // Update world chunks based on the player data instance's position
         this.worldManager.update(this.player.x, this.player.y);
@@ -440,7 +545,69 @@ if (this.tileCoordsElement && this.player) {
         if (this.miniMap) {
             this.miniMap.update();
         }
+    } // End of update method
+
+    // --- Collision Resolution Method ---
+    resolveCollision(entityA, entityB) {
+        if (!entityA || !entityB || entityA.state === 'dead' || entityB.state === 'dead') {
+            return; // Don't resolve if one is dead or invalid
+        }
+
+        const boundsA = entityA.getAbsoluteBounds();
+        const boundsB = entityB.getAbsoluteBounds();
+
+        // Calculate overlap on each axis
+        const overlapX = Math.min(boundsA.x + boundsA.width, boundsB.x + boundsB.width) - Math.max(boundsA.x, boundsB.x);
+        const overlapY = Math.min(boundsA.y + boundsA.height, boundsB.y + boundsB.height) - Math.max(boundsA.y, boundsB.y);
+
+        if (overlapX <= 0 || overlapY <= 0) {
+            return; // Should not happen if checkCollision passed, but safety check
+        }
+
+        // Determine the minimum translation vector (MTV) axis
+        let pushX = 0;
+        let pushY = 0;
+        const tolerance = 0.1; // Small tolerance to prevent jittering due to floating point inaccuracies
+
+        if (overlapX < overlapY) {
+            // Push horizontally
+            const pushAmount = overlapX + tolerance;
+            // Determine direction: push A away from B's center
+            if (boundsA.x + boundsA.width / 2 < boundsB.x + boundsB.width / 2) {
+                pushX = -pushAmount / 2; // Push A left, B right
+            } else {
+                pushX = pushAmount / 2; // Push A right, B left
+            }
+        } else {
+            // Push vertically
+            const pushAmount = overlapY + tolerance;
+            // Determine direction: push A away from B's center
+            if (boundsA.y + boundsA.height / 2 < boundsB.y + boundsB.height / 2) {
+                pushY = -pushAmount / 2; // Push A up, B down
+            } else {
+                pushY = pushAmount / 2; // Push A down, B up
+            }
+        }
+
+        // Apply the separation - directly modify positions
+        // Avoid pushing if an entity is stunned (optional, can make them feel more solid)
+        if (!entityA.isStunned) {
+            entityA.x += pushX;
+            entityA.y += pushY;
+        }
+         if (!entityB.isStunned) {
+            entityB.x -= pushX; // Apply opposite push to B
+            entityB.y -= pushY;
+        }
+
+        // Optional: Dampen velocity slightly upon collision to prevent jitter
+        // entityA.velocityX *= 0.9;
+        // entityA.velocityY *= 0.9;
+        // entityB.velocityX *= 0.9;
+        // entityB.velocityY *= 0.9;
     }
+    // --- End Collision Resolution Method ---
+
 // End of update method (Class continues below)
 
 // --- Player Death and Respawn Logic ---
@@ -652,7 +819,9 @@ updateEnemyVisuals() {
         // If not flashing, check for stun
         else if (enemy.isStunned) {
             // Display normal enemy color while stunned
-            visual.setFillStyle(0xff0000); // Default red color
+            // Determine default color based on type
+            const defaultColor = (enemy.type === 'ranged_enemy') ? 0xffa500 : 0xff0000; // Orange for ranged, Red for others
+            visual.setFillStyle(defaultColor); // Use determined default color
             visual.setScale(1.0); // Normal scale
 
             // Add confused ring above enemy if not already there
@@ -665,7 +834,9 @@ updateEnemyVisuals() {
         }
         // Otherwise, reset to default appearance
         else {
-            visual.setFillStyle(0xff0000); // Default red color
+            // Determine default color based on type when resetting
+            const defaultColor = (enemy.type === 'ranged_enemy') ? 0xffa500 : 0xff0000; // Orange for ranged, Red for others
+            visual.setFillStyle(defaultColor); // Use determined default color
             visual.setScale(1.0); // Normal scale
             visual.setAlpha(1);
 
@@ -842,6 +1013,21 @@ createOrUpdateStunEffect(enemy) {
         this.cameras.main.shake(100, 0.01);
     }
 
+    // --- Projectile Creation ---
+    createProjectile(x, y, direction, speed, damage, ownerId, type = 'projectile') {
+        // Create the logical projectile instance
+        const projectile = new Projectile(x, y, direction, speed, damage, ownerId, { type: type });
+        this.projectiles.push(projectile);
+
+        // Create the visual representation (e.g., a small circle)
+        const visual = this.add.circle(x, y, 5, 0xffff00); // Yellow color for projectiles
+        visual.setDepth(1.5); // Draw above player/enemies but below UI/debug
+        this.projectileVisuals.set(projectile.id, visual);
+
+        console.log(`Created projectile ${projectile.id} of type ${type} at (${x.toFixed(0)}, ${y.toFixed(0)}) owned by ${ownerId}`);
+        return projectile;
+    }
+
     // 2. Make the Dash Trail White
     createDashTrailEffect(x, y) {
         // Create a white dash trail marker (changed from green to white)
@@ -937,6 +1123,118 @@ createOrUpdateStunEffect(enemy) {
         });
     }
 
+    // --- Smoke Bomb Effect ---
+    createSmokeBombEffect(x, y) {
+        console.log(`Creating smoke bomb effect at (${x.toFixed(0)}, ${y.toFixed(0)})`);
+        const particleCount = 25;
+        const duration = 800; // Longer duration for smoke
+        const maxRadius = 80; // How far particles spread
+
+        for (let i = 0; i < particleCount; i++) {
+            // Create a grey circle particle
+            const greyShade = Phaser.Math.Between(50, 150); // Random grey
+            const particle = this.add.circle(x, y, Phaser.Math.Between(5, 15), `0x${greyShade.toString(16).repeat(3)}`, 0.7);
+            particle.setDepth(1.8); // Above projectiles, below UI
+
+            // Random angle and distance for spread
+            const angle = Math.random() * Math.PI * 2;
+            const radius = Math.random() * maxRadius;
+            const targetX = x + Math.cos(angle) * radius;
+            const targetY = y + Math.sin(angle) * radius;
+
+            // Animate particle: move out, expand, fade
+            this.tweens.add({
+                targets: particle,
+                x: targetX,
+                y: targetY,
+                scale: Phaser.Math.FloatBetween(2.0, 4.0), // Expand size
+                alpha: 0,
+                duration: duration * Phaser.Math.FloatBetween(0.7, 1.0), // Vary duration slightly
+                ease: 'Quad.easeOut', // Ease out for slowing down effect
+                onComplete: () => {
+                    particle.destroy();
+                }
+            });
+        }
+         // Optional: Add a brief screen shake?
+        // this.cameras.main.shake(50, 0.005);
+    }
+    // --- End Smoke Bomb Effect ---
+
+    // --- Melee Hit Effect ---
+    createMeleeHitEffect(x, y) {
+        console.log(`Creating melee hit effect at (${x.toFixed(0)}, ${y.toFixed(0)})`);
+        // Create a central flash (e.g., red)
+        const flash = this.add.circle(x, y, 25, 0xff0000, 0.7); // Red flash
+        flash.setDepth(2); // Above most elements
+
+        // Create expanding ring (e.g., darker red)
+        const ring = this.add.circle(x, y, 10, 0xcc0000, 0);
+        ring.setStrokeStyle(4, 0xcc0000, 0.8); // Darker red stroke
+        ring.setDepth(2);
+
+        // Create fewer particles than impact, maybe sharper
+        const particleCount = 6;
+        const particles = [];
+
+        for (let i = 0; i < particleCount; i++) {
+            // Create a small red square/shard as a particle
+            const particle = this.add.rectangle(x, y, 5, 5, 0xff0000, 0.9);
+            particle.setDepth(2);
+
+            // Random angle and speed
+            const angle = Math.random() * Math.PI * 2;
+            const speed = 80 + Math.random() * 120; // Slightly different speed range
+            const velocityX = Math.cos(angle) * speed;
+            const velocityY = Math.sin(angle) * speed;
+
+            particles.push(particle);
+
+            // Animate each particle
+            this.tweens.add({
+                targets: particle,
+                x: particle.x + velocityX,
+                y: particle.y + velocityY,
+                alpha: 0,
+                scale: 0.2, // Shrink particles
+                angle: Phaser.Math.Between(-180, 180), // Add rotation
+                duration: 250, // Faster duration
+                ease: 'Power1',
+                onComplete: () => {
+                    particle.destroy();
+                }
+            });
+        }
+
+        // Animate and then destroy the main effects
+        this.tweens.add({
+            targets: flash,
+            alpha: 0,
+            scale: 0.5, // Shrink flash
+            duration: 150, // Quick flash
+            ease: 'Power1',
+            onComplete: () => {
+                flash.destroy();
+            }
+        });
+
+        this.tweens.add({
+            targets: ring,
+            scaleX: 3, // Smaller expansion than impact
+            scaleY: 3,
+            alpha: 0,
+            duration: 250, // Faster expansion
+            ease: 'Quad.easeOut',
+            onComplete: () => {
+                ring.destroy();
+            }
+        });
+
+        // Optional: Less intense screen shake for melee hit?
+        this.cameras.main.shake(80, 0.008);
+        // this.cameras.main.shake(80, 0.008);
+    }
+    // --- End Melee Hit Effect ---
 
     shutdown() {
         console.log("Shutting down GameScreen..."); // Added console log back for consistency
@@ -988,6 +1286,10 @@ createOrUpdateStunEffect(enemy) {
         // Destroy any remaining enemy visuals
         this.enemyVisuals.forEach(visual => visual.destroy());
         this.enemyVisuals.clear();
-        this.enemies = []; // Clear the array
+        this.enemies = []; // Clear the enemy array
+        // Destroy any remaining projectile visuals
+        this.projectileVisuals.forEach(visual => visual.destroy());
+        this.projectileVisuals.clear();
+        this.projectiles = []; // Clear the projectile array
     }
 } // End of GameScreen class

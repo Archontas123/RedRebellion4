@@ -52,10 +52,13 @@ export class Projectile extends Entity {
 
     // Handle collision with other entities
     handleCollision(otherEntity) {
-        // Ignore collision with the entity that fired it
+        // --- IMMEDIATE OWNER CHECK ---
+        // Ignore collision with the entity that fired it, regardless of type checks below.
         if (otherEntity.id === this.ownerId) {
+            // console.log(`Projectile ${this.id} ignoring collision with owner ${this.ownerId}`); // Optional debug
             return;
         }
+        // --- END IMMEDIATE OWNER CHECK ---
 
         // Ignore collision with other projectiles for now
         if (otherEntity.type.includes('projectile')) {
