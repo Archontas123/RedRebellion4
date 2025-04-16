@@ -114,12 +114,13 @@
 
         #plasma-icon {
             display: inline-block;
-            width: 18px; /* Adjust size as needed */
-            height: 18px;
-            background-color: #00ffff; /* Simple cyan square icon */
-            border-radius: 3px; /* Slightly rounded corners */
+            width: 24px; /* Adjust size as needed */
+            height: 24px;
             margin-right: 8px; /* Space between icon and number */
-            box-shadow: 0 0 4px #00ffff;
+            vertical-align: middle; /* Align image vertically with text */
+            image-rendering: pixelated; /* Disable smoothing for pixel art */
+            filter: drop-shadow(0 0 3px #00ffff); /* Add cyan glow */
+            /* Removed background-color, border-radius, box-shadow */
         }
 
         #tile-coords-display {
@@ -136,6 +137,43 @@
             pointer-events: none; /* Allow clicks through */
             z-index: 10;
         }
+
+        #powerup-counters {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            display: flex; /* Use flexbox for layout */
+            flex-direction: column; /* Stack counters vertically */
+            align-items: flex-end; /* Align items to the right */
+            gap: 8px; /* Space between counters */
+            display: none; /* Hide by default */
+            font-family: 'Arial', sans-serif;
+            font-size: 18px;
+            color: white;
+            text-shadow: 1px 1px 2px #000000;
+        }
+
+        .powerup-counter {
+            background-color: rgba(0, 0, 0, 0.6);
+            padding: 5px 10px;
+            border-radius: 4px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            display: flex; /* Use flex for icon + text */
+            align-items: center;
+            gap: 6px;
+        }
+
+        .powerup-icon {
+            width: 16px;
+            height: 16px;
+            border-radius: 3px;
+            display: inline-block;
+        }
+
+        .powerup-icon.speed { background-color: #00aaff; box-shadow: 0 0 3px #00aaff; } /* Blue for speed */
+        .powerup-icon.damage { background-color: #ff4444; box-shadow: 0 0 3px #ff4444; } /* Red for damage */
+        .powerup-icon.fire_rate { background-color: #ffff00; box-shadow: 0 0 3px #ffff00; } /* Yellow for fire rate */
+        .powerup-icon.health { background-color: #44ff44; box-shadow: 0 0 3px #44ff44; } /* Green for health */
 
         #dust-storm-overlay {
             position: absolute;
@@ -186,11 +224,35 @@
             </div>
         </div>
         <div id="plasma-counter">
-            <span id="plasma-icon"></span>
+            <img id="plasma-icon" src="assets/plasma.png" alt="Plasma">
             <span id="plasma-count">0</span> <!-- Separate span for the count -->
         </div>
         <div id="tile-coords-display">Tile: 0, 0</div> <!-- Add coordinate display element -->
-    </div>
+        <div id="powerup-counters">
+            <!-- Speed Boost Counter -->
+            <div class="powerup-counter" id="powerup-counter-speed_boost" style="display: none;">
+                <span class="powerup-icon speed"></span>
+                <span id="powerup-count-speed_boost">Speed x 0</span>
+            </div>
+            <!-- Bleeding Counter -->
+            <div class="powerup-counter" id="powerup-counter-bleeding" style="display: none;"> <!-- Changed ID -->
+                <span class="powerup-icon damage"></span> <!-- Keep icon style (red) for now -->
+                <span id="powerup-count-bleeding">Bleed x 0</span> <!-- Changed ID and text -->
+            </div>
+            <!-- Fire Rate Boost Counter (Removed) -->
+            <!--
+            <div class="powerup-counter" id="powerup-counter-fire_rate_boost" style="display: none;">
+                <span class="powerup-icon fire_rate"></span>
+                <span id="powerup-count-fire_rate_boost">Fire Rate x 0</span>
+            </div>
+            -->
+            <!-- Health Increase Counter -->
+            <div class="powerup-counter" id="powerup-counter-health_increase" style="display: none;">
+                <span class="powerup-icon health"></span>
+                <span id="powerup-count-health_increase">Max HP x 0</span>
+            </div>
+            <!-- Add other counters here as needed -->
+        </div>
     </div>
 </body>
 </html>

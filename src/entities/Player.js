@@ -1,6 +1,7 @@
 // src/entities/Player.js
 import { Entity } from './Entity.js';
-
+import PowerupManager from './PowerupManager.js'; // Import PowerupManager
+// import Powerup from './Powerup.js'; // No longer needed here, type is passed directly
 export class Player extends Entity {
     // Add worldManager to the constructor parameters
     constructor(x, y, inputHandler, worldManager, options = {}) {
@@ -23,17 +24,35 @@ export class Player extends Entity {
             console.error("Player created without a WorldManager reference!");
         }
 
+        // --- NEW: Weapon Properties ---
+        this.currentWeapon = 'melee'; // 'melee' or 'railgun'
+        this.weapons = ['melee', 'railgun'];
+        this.currentWeaponIndex = 0;
+
+        // --- Railgun Properties ---
+        this.railgunChargeTime = 1.5; // seconds to full charge
+        this.railgunCooldown = 1.0; // seconds cooldown after firing
+        this.railgunMinDamage = 15; // <-- NEW: Minimum damage
+        this.railgunMaxDamage = 150; // Renamed for clarity
+        this.railgunProjectileSpeed = 1200;
+        this.isChargingRailgun = false;
+        this.railgunChargeTimer = 0;
+        this.railgunCooldownTimer = 0;
+        this.isRailgunMaxCharged = false; // <-- NEW: Track max charge state
+
         // Input handling
         this.inputHandler = inputHandler;
 
         // Movement properties
-        this.moveSpeed = options.moveSpeed || 200;
+        this.baseMoveSpeed = options.moveSpeed || 200; // Store the base speed
+        this.moveSpeed = this.baseMoveSpeed; // Current speed, updated by powerups
+        // speedPowerupMultiplier removed
         this.isMoving = false;
         this.direction = { x: 0, y: 1 }; // Default facing down
         this.lastMoveDirection = { x: 0, y: 1 }; // Track last movement direction for dash
 
         // Dash properties
-        this.dashSpeed = this.moveSpeed * 6; // Much faster than normal movement (increased from 4x)
+        this.dashSpeed = this.moveSpeed * 6; // Based on current move speed
         this.dashDistance = 10 * (options.tileSize || 50); // 10 tiles (increased from 6)
         this.dashDuration = 0.3; // in seconds (slightly increased)
         this.dashCooldown = 1.5; // in seconds (increased cooldown to balance the stronger dash)
@@ -44,8 +63,10 @@ export class Player extends Entity {
         this.dashDistanceTraveled = 0;
 
         // Attack properties
-        this.attackPower = options.attackPower || 1; // Updated damage
-        this.lungeSpeed = this.moveSpeed * 3; // Slightly slower than dash
+        this.baseAttackPower = options.attackPower || 25; // Base damage per hit
+        this.attackPower = this.baseAttackPower; // Current attack power (might not be needed if damage is handled per hit)
+        // damagePowerupDoubleHitChance removed
+        this.lungeSpeed = this.moveSpeed * 3; // Based on current move speed
         this.lungeDistance = 3 * (options.tileSize || 50); // 3 tiles
         this.lungeDuration = 0.2; // in seconds
         this.attackCooldown = 0.5; // in seconds
@@ -57,14 +78,7 @@ export class Player extends Entity {
         this.lungeDistanceTraveled = 0;
 
         // Mouse position for aiming
-        this.mouseX = 0;
-        this.mouseY = 0;
-        this.isMouseDown = false; // Track mouse button state
-        
-        // Setup mouse tracking
-        window.addEventListener('mousemove', this.onMouseMove.bind(this));
-        window.addEventListener('mousedown', this.onMouseDown.bind(this));
-        window.addEventListener('mouseup', this.onMouseUp.bind(this));
+        // Mouse position tracking removed (handled by scene input)
 
         // Add properties for current tile coordinates
         this.currentTileX = 0; // Added
@@ -73,49 +87,42 @@ export class Player extends Entity {
 
         // Item collection
         this.plasmaCount = 0;
-    }
 
-    onMouseMove(event) {
-        // Update mouse position for aiming
-        this.mouseX = event.clientX;
-        this.mouseY = event.clientY;
-    }
-    
-    onMouseDown(event) {
-        // Check if it's the left mouse button (button 0)
-        if (event.button === 0) {
-            this.isMouseDown = true;
-        }
-    }
-    
-    onMouseUp(event) {
-        // Check if it's the left mouse button (button 0)
-        if (event.button === 0) {
-            this.isMouseDown = false;
-        }
-    }
+        // Powerup Manager
+        this.powerupManager = new PowerupManager(this.scene, this); // Pass scene and player instance
+         this.speedBoostStacks = 0; // Track speed boost stacks
+         // this.damageBoostStacks = 0; // Track damage boost stacks // Removed
+         // this.doubleHitChanceStacks = 0; // Track double hit chance stacks // Removed
+         // this.bleedingStacks = 0; // Removed Bleeding Stacks
+         // this.fireRateBoostStacks = 0; // Track fire rate boost stacks // Removed
+         this.healthIncreaseStacks = 0; // Track health increase stacks
 
-    onMouseMove(event) {
-        // Update mouse position for aiming
-        this.mouseX = event.clientX;
-        this.mouseY = event.clientY;
-    }
+        // Base stats for powerups
+        this.baseMaxHealth = this.maxHealth; // Store initial max health
+        // this.baseProjectileDamage = options.projectileDamage || 10; // Base damage for projectiles // Removed
+        // this.currentProjectileDamage = this.baseProjectileDamage; // Current damage, modified by powerups // Removed
+        // this.baseFireRateDelay = options.fireRateDelay || 0.25; // Base delay between shots (seconds) // Removed
+        // this.currentFireRateDelay = this.baseFireRateDelay; // Current delay, modified by powerups // Removed
+     // // Recoil state properties (Removed)
+     // this.baseFriction = this.friction; // Store original friction
+     // this.isRecoiling = false;
+     // this.recoilTimer = 0;
+     // this.recoilDuration = 0.25; // Duration of reduced friction (seconds)
+     // this.recoilFriction = 0.98; // Lower friction during recoil
+ }
+
+    // onMouseMove, onMouseDown, onMouseUp removed - Handled by InputHandler via scene
 
     // Calculate direction to mouse cursor (in screen space)
-    updateAimDirection(scene) {
-        if (!scene || !scene.cameras || !scene.cameras.main) return;
+    updateAimDirection() { // No longer needs scene passed explicitly if this.scene is set
+        if (!this.scene || !this.scene.input || !this.scene.input.activePointer) return;
 
-        // Get camera object
-        const camera = scene.cameras.main;
-        
-        // Manual calculation of world to screen conversion using Phaser's camera properties
-        // This is how Phaser internally converts world coordinates to screen coordinates
-        const screenX = (this.x - camera.scrollX) * camera.zoom;
-        const screenY = (this.y - camera.scrollY) * camera.zoom;
-        
-        // Get direction from player to mouse
-        const dx = this.mouseX - screenX;
-        const dy = this.mouseY - screenY;
+        // Get the active pointer from the scene's input manager
+        const pointer = this.scene.input.activePointer;
+
+        // Get direction from player's world position to pointer's world position
+        const dx = pointer.worldX - this.x;
+        const dy = pointer.worldY - this.y;
         
         // Normalize direction vector
         const length = Math.sqrt(dx * dx + dy * dy);
@@ -134,20 +141,33 @@ export class Player extends Entity {
         }
         if (this.state === 'dead') return;
 
+        // // Handle recoil state timer (Removed)
+        // if (this.isRecoiling) {
+        //     this.recoilTimer -= deltaTime;
+        //     if (this.recoilTimer <= 0) {
+        //         this.isRecoiling = false;
+        //         console.log("Recoil state ended.");
+        //     }
+        // }
+
         // Reset velocity before processing inputs and states
         this.velocityX = 0;
         this.velocityY = 0;
 
         // Update aim direction based on mouse position
-        this.updateAimDirection(scene);
+        this.updateAimDirection(); // Use internal scene reference
 
         // Handle cooldown timers
         if (this.dashCooldownTimer > 0) {
             this.dashCooldownTimer -= deltaTime;
         }
         
-        if (this.attackCooldownTimer > 0) {
+        if (this.attackCooldownTimer > 0) { // Melee cooldown
             this.attackCooldownTimer -= deltaTime;
+        }
+        // --- NEW: Railgun Cooldown Timer ---
+        if (this.railgunCooldownTimer > 0) {
+            this.railgunCooldownTimer -= deltaTime;
         }
 
         // Process dashing state
@@ -157,11 +177,26 @@ export class Player extends Entity {
         // Process attacking state
         else if (this.isAttacking) {
             this.updateAttack(deltaTime);
-        } 
-        // Process normal movement
+        }
+        // --- NEW: Process Railgun Charging State ---
+        else if (this.isChargingRailgun) {
+            this.updateRailgunCharge(deltaTime);
+            this.processInput(); // Still allow movement/dash input while charging
+        }
+        // Process normal movement/other inputs
         else {
             this.processInput();
         }
+
+        // // Temporarily adjust friction before parent update (Removed)
+        // if (this.isRecoiling) {
+        //     this.friction = this.recoilFriction;
+        // } else {
+        //     // Ensure friction is always the base value if recoil is removed
+        //     this.friction = this.baseFriction || 0.85; // Use stored base or default
+        // }
+        // Ensure friction is set correctly (might have been missed if baseFriction wasn't initialized)
+        this.friction = this.baseFriction || 0.85;
 
         // Call parent update for physics (updates this.x, this.y)
         super.update(deltaTime);
@@ -171,10 +206,17 @@ export class Player extends Entity {
 
         // Optional: Log current tile coordinates for debugging
         // console.log(`Player at Tile: ${this.currentTileX}, ${this.currentTileY}`);
+
+// --- Speed Trail Effect ---
+if (this.isMoving && this.speedBoostStacks > 0 && this.scene && typeof this.scene.createSpeedTrailEffect === 'function') {
+    this.scene.createSpeedTrailEffect(this.x, this.y, this.speedBoostStacks, this.velocityX, this.velocityY);
+}
+        // Speed trail effect removed
     }
 
     processInput() {
-        // Only process movement input if not dashing or attacking
+        // Only process movement input if not dashing or doing melee attack
+        // Allow movement while charging railgun
         if (this.isDashing || this.isAttacking) return;
 
         let moveX = 0;
@@ -193,35 +235,208 @@ export class Player extends Entity {
             moveY /= length;
         }
 
-        // Apply movement speed
+        // Apply movement speed (unless charging, maybe slow down?)
+        // For now, allow full speed while charging
         this.velocityX = moveX * this.moveSpeed;
         this.velocityY = moveY * this.moveSpeed;
 
         // Update movement state
         this.isMoving = moveX !== 0 || moveY !== 0;
-        
+
         // Track last movement direction for dash
         if (this.isMoving) {
-            this.lastMoveDirection = {
-                x: moveX,
-                y: moveY
-            };
-            this.setState('moving');
+            this.lastMoveDirection = { x: moveX, y: moveY };
+            // Don't set state to 'moving' if charging, maybe a 'charging_moving' state?
+            if (!this.isChargingRailgun) {
+                 this.setState('moving');
+            }
         } else {
-            this.setState('idle');
+             if (!this.isChargingRailgun) {
+                this.setState('idle');
+             }
         }
 
         // Dash with Space
         if (this.inputHandler.wasPressed('Space') && this.dashCooldownTimer <= 0) {
+            // If charging, cancel charge? Or allow dash? Let's allow dash and cancel charge.
+            if (this.isChargingRailgun) {
+                this.cancelRailgunCharge();
+            }
             this.startDash();
+            return; // Don't process other actions if dashing
         }
 
-        // Check for mouse click attack
-        if (this.isMouseDown && this.attackCooldownTimer <= 0 && !this.isAttacking) {
-            this.startAttack();
-            // Reset mouse down to prevent multiple attacks from a single click
-            this.isMouseDown = false;
+        // --- NEW: Weapon Swap with E ---
+        if (this.inputHandler.wasPressed('KeyE')) {
+            this.swapWeapon();
         }
+
+        // --- Action based on current weapon ---
+        if (this.currentWeapon === 'melee') {
+            // Melee Attack with Left Click
+            if (this.inputHandler.wasLeftPointerPressed() && this.attackCooldownTimer <= 0 && !this.isAttacking) {
+                 // Cannot attack if charging railgun (shouldn't happen if logic is right, but safety check)
+                if (!this.isChargingRailgun) {
+                    this.startAttack();
+                }
+            }
+        } else if (this.currentWeapon === 'railgun') {
+            // Railgun Charge/Fire with R
+            if (this.inputHandler.isDown('KeyR') && this.railgunCooldownTimer <= 0 && !this.isChargingRailgun && !this.isDashing && !this.isAttacking) {
+                // Start charging ONLY if not already charging and cooldown is ready
+                this.startChargingRailgun();
+            } else if (!this.inputHandler.isDown('KeyR') && this.isChargingRailgun) {
+                // Fire when R key is released
+                this.fireRailgun(); // fireRailgun will check charge level
+            }
+        }
+    }
+
+    // --- NEW: Weapon Swap Method ---
+    swapWeapon() {
+        this.currentWeaponIndex = (this.currentWeaponIndex + 1) % this.weapons.length;
+        this.currentWeapon = this.weapons[this.currentWeaponIndex];
+        console.log(`Swapped weapon to: ${this.currentWeapon}`);
+        // Cancel charge if swapping away from railgun while charging
+        if (this.currentWeapon !== 'railgun' && this.isChargingRailgun) {
+            this.cancelRailgunCharge();
+        }
+        // TODO: Update UI to show current weapon
+    }
+
+    // --- NEW: Railgun Methods ---
+    startChargingRailgun() {
+        if (this.railgunCooldownTimer <= 0) {
+            this.isChargingRailgun = true;
+            this.railgunChargeTimer = 0;
+            this.setState('charging'); // Add a new state for visual feedback
+            console.log("Charging railgun...");
+            // Maybe slow down player while charging?
+            // this.velocityX *= 0.5;
+            // this.velocityY *= 0.5;
+        }
+    }
+
+    updateRailgunCharge(deltaTime) {
+        if (!this.isChargingRailgun) return;
+
+        this.railgunChargeTimer += deltaTime;
+        const wasMaxCharged = this.isRailgunMaxCharged; // Store previous state
+        this.isRailgunMaxCharged = this.railgunChargeTimer >= this.railgunChargeTime;
+
+        // --- NEW: Screen Shake at Max Charge ---
+        if (this.isRailgunMaxCharged && !wasMaxCharged) {
+            // Just reached max charge, start shaking
+            if (this.scene && typeof this.scene.startContinuousShake === 'function') {
+                // --- REDUCED SHAKE INTENSITY ---
+                this.scene.startContinuousShake(0.003); // Reduced intensity from 0.005
+            }
+        } else if (!this.isRailgunMaxCharged && wasMaxCharged) {
+             // No longer max charged (shouldn't happen normally while holding, but safety)
+             if (this.scene && typeof this.scene.stopContinuousShake === 'function') {
+                this.scene.stopContinuousShake();
+            }
+        }
+        // --- End Screen Shake Logic ---
+
+        // This block was duplicated, removing the second instance.
+        // The first instance starting around line 300 handles this logic correctly.
+
+        // Optional: Add visual feedback for charge level
+        // console.log(`Charging: ${((this.railgunChargeTimer / this.railgunChargeTime) * 100).toFixed(0)}%`);
+
+        // Prevent movement input from overriding charge state visually
+        if (this.isMoving) {
+             this.setState('charging_moving'); // Or similar state
+        } else {
+             this.setState('charging');
+        }
+
+        // Prevent velocity from being reset if moving while charging
+        // The velocity calculation is now inside processInput, which is called even during charge
+    }
+
+    fireRailgun() {
+        if (!this.isChargingRailgun) return; // Should not happen, but safety check
+
+        const chargeRatio = Math.min(this.railgunChargeTimer / this.railgunChargeTime, 1.0);
+        const minChargeToFire = 0.1; // Lower minimum charge threshold (was 0.2)
+
+        console.log(`Attempting to fire railgun. Charge ratio: ${chargeRatio.toFixed(2)}`);
+
+        // --- Stop Screen Shake ---
+        if (this.isRailgunMaxCharged) {
+             if (this.scene && typeof this.scene.stopContinuousShake === 'function') {
+                this.scene.stopContinuousShake();
+            }
+        }
+        // --- End Stop Screen Shake ---
+
+
+        if (chargeRatio >= minChargeToFire) {
+            // --- Calculate Damage Based on Charge ---
+            const damage = this.railgunMinDamage + (this.railgunMaxDamage - this.railgunMinDamage) * chargeRatio;
+            console.log(`Firing railgun! (Charge: ${(chargeRatio * 100).toFixed(0)}%, Damage: ${damage.toFixed(0)})`);
+            // --- End Damage Calculation ---
+
+            this.railgunCooldownTimer = this.railgunCooldown; // Set cooldown
+
+            // Create and launch projectile
+            if (this.scene && typeof this.scene.createRailgunProjectile === 'function') {
+                this.scene.createRailgunProjectile(
+                    this.x,
+                    this.y,
+                    this.direction.x, // Use aim direction
+                    this.direction.y,
+                    damage, // Pass calculated damage
+                    this.railgunProjectileSpeed,
+                    chargeRatio // Pass charge ratio for potential effects (e.g., beam width/intensity)
+                );
+
+                // --- Recoil Removed ---
+                // const recoilForceBase = 4000;
+                // const recoilForce = recoilForceBase * (0.1 + chargeRatio * 2.0);
+                // const recoilDirectionX = -this.direction.x;
+                // const recoilDirectionY = -this.direction.y;
+                // this.velocityX += recoilDirectionX * recoilForce;
+                // this.velocityY += recoilDirectionY * recoilForce;
+                // this.isRecoiling = true;
+                // this.recoilTimer = this.recoilDuration;
+                // console.log(`Applied recoil with force: ${recoilForce.toFixed(0)}, starting recoil state.`);
+                // --- End Recoil ---
+
+            } else {
+                console.error("Scene or createRailgunProjectile method not found!");
+            }
+
+            // TODO: Add firing sound effect
+            // TODO: Add visual effect (muzzle flash, recoil?)
+
+        } else {
+            console.log("Railgun fizzled - not enough charge.");
+            // Optional: Play a fizzle sound
+        }
+
+        // Reset charging state regardless of firing success
+        this.cancelRailgunCharge();
+    }
+
+     cancelRailgunCharge() {
+         if (!this.isChargingRailgun) return;
+
+         // --- Stop Screen Shake if cancelling ---
+         if (this.isRailgunMaxCharged) {
+             if (this.scene && typeof this.scene.stopContinuousShake === 'function') {
+                this.scene.stopContinuousShake();
+            }
+         }
+         // --- End Stop Screen Shake ---
+
+         this.isChargingRailgun = false;
+         this.railgunChargeTimer = 0;
+         this.isRailgunMaxCharged = false; // Reset max charge flag
+         this.setState(this.isMoving ? 'moving' : 'idle'); // Revert to appropriate state
+         console.log("Railgun charge cancelled.");
     }
 
     startDash() {
@@ -260,17 +475,20 @@ export class Player extends Entity {
         }
     }
     
-    // Create a visual dash trail effect (stub - implement in actual game scene)
+    // Create a visual dash trail effect
     createDashTrail() {
-        // This would be implemented with the game's rendering system
-        // For example, in Phaser you might create particles or sprites
-        // This is just a placeholder for the concept
+        // Placeholder - could use a different particle effect than the speed trail
         if (this.scene && this.scene.createDashTrailEffect) {
             this.scene.createDashTrailEffect(this.x, this.y);
         }
     }
 
+    // Speed trail logic removed
+
+    // Modify startAttack to only work for melee
     startAttack() {
+        if (this.currentWeapon !== 'melee') return; // Only melee weapon uses this
+
         this.isAttacking = true;
         this.enemiesHitThisAttack.clear(); // Clear the set at the start of each attack
         this.lungeTimer = 0;
@@ -392,6 +610,8 @@ handleCollision(otherEntity) {
         return; // Stop further collision handling for this item
     }
 
+    // Powerup collection logic removed
+
     // --- Lunge Attack Collision ---
     if (this.isAttacking) {
         console.log(`Player attacking, collided with: ${otherEntity?.id} (Type: ${otherEntity?.type})`);
@@ -400,62 +620,61 @@ handleCollision(otherEntity) {
              console.log(`>>> Enemy collision detected during attack! Applying effects to ${otherEntity.id}`);
              // Ensure enemy is not already dead AND hasn't been hit by this attack yet
              if (otherEntity.state !== 'dead' && !this.enemiesHitThisAttack.has(otherEntity.id)) {
-                // 1. Apply Damage
-                otherEntity.takeDamage(this.attackPower);
-                this.enemiesHitThisAttack.add(otherEntity.id); // Mark this enemy as hit for this attack
+                // --- Apply First Hit ---
+                otherEntity.takeDamage(this.baseAttackPower);
+                this.enemiesHitThisAttack.add(otherEntity.id); // Mark as hit for this lunge
 
-                // 2. Apply Enhanced Knockback
+                // Apply knockback
+                const knockbackForce = 800;
+                const knockbackDirectionX = otherEntity.x - this.x;
+                const knockbackDirectionY = otherEntity.y - this.y;
                 if (this.scene) {
-                    const knockbackForce = 800;
-                    const knockbackDirectionX = otherEntity.x - this.x;
-                    const knockbackDirectionY = otherEntity.y - this.y;
                     this.scene.applyEnhancedKnockback(otherEntity, knockbackDirectionX, knockbackDirectionY, knockbackForce);
                 }
 
-                // 3. Apply longer stun
-                const stunDuration = 0.8; // seconds - increased from 0.5
+                // Apply stun
+                const stunDuration = 0.8;
                 otherEntity.stun(stunDuration);
 
-                // 4. Remove hitFlash call since the enemy handles it internally
-
-                // 5. Create impact effect at the hit location
+                // Create standard impact effect
                 if (this.scene && this.scene.createImpactEffect) {
-                    this.scene.createImpactEffect(otherEntity.x, otherEntity.y);
+                    this.scene.createImpactEffect(otherEntity.x, otherEntity.y, 1);
                 }
 
-                // 6. Trigger camera shake for feedback
+                // Trigger camera shake
                 if (this.scene && this.scene.cameras && this.scene.cameras.main) {
-                    this.scene.cameras.main.shake(100, 0.01); // Duration: 100ms, Intensity: 0.01
+                    this.scene.cameras.main.shake(100, 0.01);
                 }
 
-                // 7. Enhanced hit-stop effect scaled by damage
+                // Apply standard hit-stop
                 if (this.scene && this.scene.applyHitStop) {
-                    this.scene.applyHitStop(this, otherEntity, this.attackPower);
+                    this.scene.applyHitStop(this, otherEntity, this.baseAttackPower, 1);
                 } else {
-                    // Fallback to old hit-stop if enhanced version isn't available
+                    // Fallback hit-stop
                     if (this.scene) {
-                        // Save current velocities
                         const playerVelX = this.velocityX;
                         const playerVelY = this.velocityY;
-                        const enemyVelX = otherEntity.velocityX;
-                        const enemyVelY = otherEntity.velocityY;
-                        
-                        // Stop all movement momentarily
-                        this.velocityX = 0;
-                        this.velocityY = 0;
-                        otherEntity.velocityX = 0;
-                        otherEntity.velocityY = 0;
-                        
-                        // Resume after brief pause with slightly reduced player velocity
+                        this.velocityX = 0; this.velocityY = 0;
+                        otherEntity.velocityX = 0; otherEntity.velocityY = 0;
                         this.scene.time.delayedCall(80, () => {
-                            // Resume with some velocity reduction (to make hits feel impactful)
-                            this.velocityX = playerVelX * 0.7;
-                            this.velocityY = playerVelY * 0.7;
-                            
-                            // Enemy velocity is set by knockback, no need to restore
+                            this.velocityX = playerVelX * 0.7; this.velocityY = playerVelY * 0.7;
                         });
                     }
                 }
+
+                // // --- Apply Bleeding --- (Removed)
+                // const bleedStacks = this.bleedingStacks || 0;
+                // if (bleedStacks > 0 && typeof otherEntity.applyBleed === 'function') {
+                //     const baseBleedDPS = 5;
+                //     const bleedDPSPerStack = 2;
+                //     const maxStacks = 5;
+                //     const actualStacks = Math.min(bleedStacks, maxStacks);
+                //     const totalBleedDPS = baseBleedDPS + (actualStacks * bleedDPSPerStack);
+                //     const bleedDuration = 3; // seconds
+                //
+                //     console.log(`Applying Bleed: ${totalBleedDPS.toFixed(1)} DPS for ${bleedDuration}s (Stacks: ${actualStacks})`);
+                //     otherEntity.applyBleed(totalBleedDPS, bleedDuration);
+                // }
              }
         }
     }
@@ -474,6 +693,101 @@ updateCurrentTileCoords() {
         }
     }
 }
+
+    /**
+     * Updates the player's movement speed based on the number of active speed boost stacks.
+     * Also recalculates dependent speeds like dash and lunge.
+     * @param {number} stacks - The number of active speed boost stacks.
+     */
+    updateSpeed(stacks) {
+        const speedBoostPerStack = 0.05; // 5% increase per stack
+        const maxStacks = 15; // Maximum number of stacks allowed
+        const actualStacks = Math.min(stacks, maxStacks); // Clamp stacks to the maximum
+        this.speedBoostStacks = actualStacks; // Store the actual stacks for visual effects
+
+        const speedMultiplier = 1 + (actualStacks * speedBoostPerStack);
+        this.moveSpeed = this.baseMoveSpeed * speedMultiplier;
+
+        // Recalculate dependent speeds
+        this.dashSpeed = this.moveSpeed * 6;
+        this.lungeSpeed = this.moveSpeed * 3;
+
+        // console.log(`Updated speed. Stacks: ${this.speedBoostStacks}, Multiplier: ${speedMultiplier.toFixed(2)}, MoveSpeed: ${this.moveSpeed.toFixed(2)}`); // Debug log
+    }
+ 
+    // /** // Removed updateDamage method
+    //  * Updates the player's projectile damage based on damage boost stacks.
+    //  * @param {number} stacks - The number of active damage boost stacks.
+    //  */
+    // updateDamage(stacks) {
+    //     const damageBoostPerStack = 0.10; // 10% increase per stack
+    //     const maxStacks = 5; // Maximum number of stacks allowed
+    //     const actualStacks = Math.min(stacks, maxStacks); // Clamp stacks to the maximum
+    //     this.damageBoostStacks = actualStacks; // Store the stack count
+ 
+    //     const damageMultiplier = 1 + (actualStacks * damageBoostPerStack);
+    //     this.currentProjectileDamage = this.baseProjectileDamage * damageMultiplier;
+ 
+    //     // console.log(`Updated damage. Stacks: ${actualStacks}, Multiplier: ${damageMultiplier.toFixed(2)}, Damage: ${this.currentProjectileDamage.toFixed(2)}`); // Debug log
+    // }
+ 
+    // /** // Removed updateFireRate method
+    //  * Updates the player's fire rate (delay between shots) based on fire rate boost stacks.
+    //  * @param {number} stacks - The number of active fire rate boost stacks.
+    //  */
+    // updateFireRate(stacks) {
+    //     const fireRateIncreasePerStack = 0.08; // 8% increase in rate per stack (means lower delay)
+    //     const maxStacks = 5; // Maximum number of stacks allowed
+    //     const actualStacks = Math.min(stacks, maxStacks); // Clamp stacks to the maximum
+    //     this.fireRateBoostStacks = actualStacks; // Store the stack count
+ 
+    //     // Calculate the multiplier for the delay (inverse of rate increase)
+    //     const delayMultiplier = 1 / (1 + (actualStacks * fireRateIncreasePerStack));
+    //     this.currentFireRateDelay = this.baseFireRateDelay * delayMultiplier;
+ 
+    //     // console.log(`Updated fire rate. Stacks: ${actualStacks}, Delay Multiplier: ${delayMultiplier.toFixed(3)}, Delay: ${this.currentFireRateDelay.toFixed(3)}s`); // Debug log
+    // }
+ 
+    /**
+     * Updates the player's maximum health based on health increase stacks.
+     * Also increases current health proportionally.
+     * @param {number} stacks - The number of active health increase stacks.
+     */
+    updateMaxHealth(stacks) {
+        const healthIncreasePerStack = 20;
+        const maxStacks = 5; // Maximum number of stacks allowed
+        const actualStacks = Math.min(stacks, maxStacks); // Clamp stacks to the maximum
+        this.healthIncreaseStacks = actualStacks; // Store the stack count
+ 
+        const healthIncrease = actualStacks * healthIncreasePerStack;
+        const newMaxHealth = this.baseMaxHealth + healthIncrease;
+ 
+        // Calculate how much the max health actually changed in this update
+        const maxHealthDifference = newMaxHealth - this.maxHealth;
+ 
+        this.maxHealth = newMaxHealth;
+ 
+        // Increase current health by the same amount the max health increased,
+        // but don't exceed the new max health.
+        if (maxHealthDifference > 0) {
+            this.health = Math.min(this.health + maxHealthDifference, this.maxHealth);
+        }
+ 
+        // console.log(`Updated max health. Stacks: ${actualStacks}, Increase: ${healthIncrease}, MaxHealth: ${this.maxHealth}, CurrentHealth: ${this.health}`); // Debug log
+ 
+        // Notify the UI to update the health bar display
+        if (this.scene && this.scene.uiManager && typeof this.scene.uiManager.updateHealthBar === 'function') {
+            this.scene.uiManager.updateHealthBar(this.health, this.maxHealth);
+        } else {
+            // console.warn("Could not update UI health bar - scene.uiManager.updateHealthBar not found.");
+        }
+    }
+
+// Powerup management methods (addPowerup, calculateCurrentStats) removed.
+// Player now uses base stats directly, updated via methods like updateSpeed.
+// Dependent speeds (dashSpeed, lungeSpeed) are initialized in the constructor based on baseMoveSpeed.
+
+// Visual effect for double hit (damage powerup) removed
 
     // Override takeDamage to implement player-specific damage handling
     takeDamage(amount) {
@@ -517,9 +831,15 @@ updateCurrentTileCoords() {
 
     // Clean up when player is destroyed
     destroy() {
-        window.removeEventListener('mousemove', this.onMouseMove);
-        window.removeEventListener('mousedown', this.onMouseDown);
-        window.removeEventListener('mouseup', this.onMouseUp);
+        // Removed window event listeners - they are no longer added
+        // Trail particle cleanup removed
+
+        // Destroy the powerup manager
+        if (this.powerupManager) {
+            this.powerupManager.destroy();
+            this.powerupManager = null;
+        }
+
         super.destroy();
     }
 }

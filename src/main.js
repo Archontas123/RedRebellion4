@@ -1,5 +1,6 @@
 import StartScreen from './scenes/StartScene.js';
 import GameScreen from './scenes/GameScreen.js';
+import PowerupSelectionScreen from './scenes/PowerupSelectionScreen.js'; // Import the new scene
 
 const config = {
     type: Phaser.AUTO, // Use WebGL if available, otherwise Canvas
@@ -15,9 +16,14 @@ const config = {
     },
     scale: {
         mode: Phaser.Scale.RESIZE, // Resize the game canvas to fill the container
-        autoCenter: Phaser.Scale.CENTER_BOTH // Center the game canvas horizontally and vertically
+        autoCenter: Phaser.Scale.CENTER_BOTH, // Center the game canvas horizontally and vertically
+        width: '100%',
+        height: '100%',
+        parent: 'phaser-game',
+        expandParent: true
     },
-    scene: [StartScreen] // Only start with the StartScreen initially
+    // Add all scenes to the config so they are known by the Scene Manager
+    scene: [StartScreen, GameScreen, PowerupSelectionScreen]
 };
 
 const game = new Phaser.Game(config);

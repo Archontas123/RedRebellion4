@@ -96,9 +96,8 @@ export class EnemyManager {
         } else { // 75% chance to spawn a base Enemy
             console.log(`Spawning base Enemy at ${x.toFixed(0)}, ${y.toFixed(0)}`);
             const enemySpeed = 60 + Math.floor(Math.random() * 60); // 60-120 speed
-            const enemyHealth = 2; // Set health to 2
             enemy = new Enemy(x, y, {
-                maxHealth: enemyHealth,
+                // maxHealth is now handled by the Enemy class default
                 moveSpeed: enemySpeed,
                 collisionBounds: collisionBounds,
                 aggressiveness: 0.5 + Math.random() * 0.5, // 0.5-1.0 aggressiveness

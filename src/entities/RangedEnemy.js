@@ -6,7 +6,7 @@ export class RangedEnemy extends Enemy {
     constructor(x, y, options = {}) {
         // Default ranged enemy options, extending base enemy options
         const rangedOptions = {
-            maxHealth: options.maxHealth || 2, // Ranged enemies might be less tanky
+            maxHealth: options.maxHealth || 75, // Ranged enemies might be less tanky
             moveSpeed: options.moveSpeed || 60, // Slightly slower maybe
             detectionRange: options.detectionRange || 600, // Increased detection range
             attackRange: options.attackRange || 700, // Increased attack range (now 700px)

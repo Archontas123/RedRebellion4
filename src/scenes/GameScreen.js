@@ -7,7 +7,8 @@ import { EnemyManager } from '../entities/EnemyManager.js';
 import { Plasma } from '../entities/Plasma.js'; // Import Plasma
 import MiniMap from '../ui/MiniMap.js'; // Import MiniMap
 import { Projectile } from '../entities/Projectile.js'; // Import Projectile
-
+import { RailgunProjectile } from '../entities/RailgunProjectile.js'; // <-- NEW IMPORT
+import Powerup from '../entities/Powerup.js'; // Import Powerup
 export default class GameScreen extends Phaser.Scene {
     constructor() {
         super('GameScreen');
@@ -34,6 +35,9 @@ export default class GameScreen extends Phaser.Scene {
         this.tileCoordsElement = null; // Reference to the HTML coordinate display element
         this.projectiles = []; // Array to hold projectile instances
         this.projectileVisuals = new Map(); // Map projectile ID to Phaser GameObject
+        this.powerupCountersContainerElement = null; // Reference to the main powerup counters div
+        this.powerupCounterElements = {}; // Object to hold references to individual counter elements { type: { container: div, text: span } }
+        this.isShakingContinuously = false; // <-- NEW: Track continuous shake state
     }
 
     preload() {
@@ -47,6 +51,11 @@ export default class GameScreen extends Phaser.Scene {
 
         // Removed health_gradient texture generation
 
+        // Load the plasma image
+        this.load.image('plasma_img', 'assets/plasma.png');
+        // Load the bullet images
+        this.load.image('bullet', 'assets/bullet.png');
+        this.load.image('plasma_bullet', 'assets/Plasma_Bullet.png'); // Load the new plasma bullet
     }
 
     create() {
@@ -96,7 +105,7 @@ export default class GameScreen extends Phaser.Scene {
 
         // --- Camera Setup ---
         this.cameras.main.startFollow(this.playerVisual); // Camera follows the visual object
-        this.cameras.main.setZoom(0.75); // Zoom the camera out (30% of original 2.5)
+        this.cameras.main.setZoom(1); // Set camera zoom to 1
 
         this.cameras.main.setBackgroundColor('#2d2d2d');
 
@@ -146,8 +155,6 @@ export default class GameScreen extends Phaser.Scene {
 
 
 
-
-
         // Removed: Phaser Tile Coordinates Text (moved to HTML)
 
         // --- HTML Tile Coordinates Setup ---
@@ -167,25 +174,66 @@ export default class GameScreen extends Phaser.Scene {
             console.error("Failed to initialize MiniMap: Required components missing.");
         }
 
-        // --- Blue Debug Tint Overlay ---
-        this.debugOverlay = this.add.rectangle(
-            this.cameras.main.centerX,
-            this.cameras.main.centerY,
-            this.cameras.main.width,
-            this.cameras.main.height,
-            0x0000ff, // Blue color
-            0.2 // Semi-transparent alpha
-        );
-        this.debugOverlay.setScrollFactor(0); // Keep fixed to camera
-        this.debugOverlay.setDepth(10); // Draw above game, below critical UI
-        // --- End Blue Debug Tint Overlay ---
+        // --- Powerup Counters UI Setup ---
+        this.powerupCountersContainerElement = document.getElementById('powerup-counters');
+        if (this.powerupCountersContainerElement) {
+            this.powerupCountersContainerElement.style.display = 'flex'; // Show the container
 
-        // --- Resize Handler for Overlay ---
-        this.scale.on('resize', this.handleResize, this);
+            // Get references to specific counter elements (add more as needed)
+            const speedBoostContainer = document.getElementById('powerup-counter-speed_boost');
+            const speedBoostText = document.getElementById('powerup-count-speed_boost');
+            if (speedBoostContainer && speedBoostText) {
+                this.powerupCounterElements['speed_boost'] = {
+                    container: speedBoostContainer,
+                    text: speedBoostText
+                };
+            } else {
+                console.warn("Speed Boost counter elements not found in HTML.");
+            }
+ 
+            // Add references for other powerup types (Updated for bleeding)
+            // // Bleeding UI References Removed
+            // const bleedingContainer = document.getElementById('powerup-counter-bleeding');
+            // const bleedingText = document.getElementById('powerup-count-bleeding');
+            // if (bleedingContainer && bleedingText) {
+            //     this.powerupCounterElements['bleeding'] = { container: bleedingContainer, text: bleedingText };
+            // } else {
+            //     // console.warn("Bleeding counter elements not found in HTML."); // Keep commented
+            // }
+ 
+            const fireRateBoostContainer = document.getElementById('powerup-counter-fire_rate_boost');
+            const fireRateBoostText = document.getElementById('powerup-count-fire_rate_boost');
+            if (fireRateBoostContainer && fireRateBoostText) {
+                this.powerupCounterElements['fire_rate_boost'] = { container: fireRateBoostContainer, text: fireRateBoostText };
+            } else {
+                console.warn("Fire Rate Boost counter elements not found in HTML.");
+            }
+ 
+            const healthIncreaseContainer = document.getElementById('powerup-counter-health_increase');
+            const healthIncreaseText = document.getElementById('powerup-count-health_increase');
+            if (healthIncreaseContainer && healthIncreaseText) {
+                this.powerupCounterElements['health_increase'] = { container: healthIncreaseContainer, text: healthIncreaseText };
+            } else {
+                console.warn("Health Increase counter elements not found in HTML.");
+            }
+        } else {
+            console.error("Powerup counters container element not found in HTML!");
+        }
+
+        // --- Blue Debug Tint Overlay Removed ---
+
+        // --- Resize Handler ---
+        this.scale.on('resize', this.handleResize, this); // Keep resize handler for other potential uses
         // --- End Resize Handler ---
 
         // Force a scale refresh after scene creation to ensure dimensions are correct
         this.scale.refresh();
+
+        // --- Debug Key for Powerup Selection ---
+        this.input.keyboard.on('keydown-P', () => {
+            console.log("Debug: Opening Powerup Selection...");
+            this.openPowerupSelection();
+        });
     }
 
     update(time, delta) {
@@ -358,30 +406,44 @@ export default class GameScreen extends Phaser.Scene {
 
             // Check against Player (if projectile owner is not player)
             if (projectile.ownerId !== this.player.id && this.player.state !== 'dead') {
+                // Use the projectile's checkCollision method
                 if (projectile.checkCollision(this.player, dtSeconds)) {
-                    console.log(`Projectile ${projectile.id} hit player ${this.player.id}`);
-                    this.player.takeDamage(projectile.damage);
-                    projectile.destroy(); // Mark projectile as dead using its destroy method
-                    // Optional: Create impact effect at player location
+                    // Let the projectile handle the collision logic internally
+                    projectile.handleCollision(this.player);
+                    // If the projectile is now dead after handling collision, skip further checks
+                    if (projectile.state === 'dead') return;
+                    // Create impact effect at player location
                     this.createImpactEffect(this.player.x, this.player.y);
+                    // Apply screen shake ONLY when player is hit
+                    this.cameras.main.shake(100, 0.01);
                 }
             }
 
-            // Check against Enemies (if projectile owner is not the enemy itself)
+            // Check against Enemies
             this.enemies.forEach(enemy => {
-                if (projectile.state === 'dead') return; // Skip if projectile already hit something
-                // Additional check: Prevent enemy projectiles from hitting other enemies
-                const isEnemyProjectile = projectile.type === 'enemy_projectile';
-                const isTargetEnemy = (enemy.type === 'enemy' || enemy.type === 'ranged_enemy');
+                // Skip if projectile or enemy is dead, or if projectile owner is this enemy
+                if (projectile.state === 'dead' || enemy.state === 'dead' || projectile.ownerId === enemy.id) {
+                    return;
+                }
 
-                if (enemy.state !== 'dead' && projectile.ownerId !== enemy.id && !(isEnemyProjectile && isTargetEnemy)) {
-                    if (projectile.checkCollision(enemy, dtSeconds)) {
-                        console.log(`Projectile ${projectile.id} hit enemy ${enemy.id}`);
-                        enemy.takeDamage(projectile.damage);
-                        projectile.destroy(); // Mark projectile as dead using its destroy method
-                        // Optional: Create impact effect at enemy location
-                        this.createImpactEffect(enemy.x, enemy.y);
-                    }
+                // Use the projectile's checkCollision method
+                if (projectile.checkCollision(enemy, dtSeconds)) {
+                    // Let the projectile handle the collision logic internally
+                    // This allows RailgunProjectile to pierce and track hits
+                    projectile.handleCollision(enemy);
+
+                    // Optional: Create impact effect even for piercing hits?
+                    // Only create effect if the projectile actually damaged the enemy (handleCollision might prevent damage if already hit)
+                    // We might need a return value from handleCollision or check enemy health change if effects are desired per-hit on piercing.
+                    // For now, let's assume impact effects are handled elsewhere or not needed per pierce.
+                    // if (projectile.type === 'player_railgun_projectile') {
+                    //     // Maybe a smaller effect for pierce?
+                    //     // this.createImpactEffect(enemy.x, enemy.y, 0.5); // Example: smaller scale
+                    // }
+
+                    // --- IMPORTANT CHANGE: Do NOT destroy piercing projectiles here ---
+                    // The projectile's handleCollision or lifetime will manage its destruction.
+                    // Base projectiles will still destroy themselves within their handleCollision.
                 }
             });
         });
@@ -416,13 +478,24 @@ export default class GameScreen extends Phaser.Scene {
 
             // Ensure visual exists for the item
             if (!this.itemVisuals.has(item.id)) {
-                // Create a visual based on item properties (simple circle for Plasma)
-                const itemVisual = this.add.circle(
-                    item.x, item.y,
-                    item.collisionBounds.width / 2, // Use radius from bounds
-                    0x00FFFF, // Cyan color for Plasma
-                    1 // Alpha
-                );
+                let itemVisual;
+                if (item.type === 'plasma') {
+                    // Use the loaded plasma image
+                    itemVisual = this.add.image(item.x, item.y, 'plasma_img');
+                    // Optional: Adjust origin or scale if needed
+                    // itemVisual.setOrigin(0.5);
+                    itemVisual.setScale(1.5); // Make the image 50% larger
+                    itemVisual.texture.setFilter(Phaser.Textures.FilterMode.NEAREST); // Disable smoothing
+                    itemVisual.postFX.addGlow(0x00ffff, 1, 0, false, 0.1, 10); // Add cyan glow (color, outerStrength, innerStrength, knockout, quality, distance)
+                } else {
+                    // Fallback for other item types (if any)
+                    itemVisual = this.add.circle(
+                        item.x, item.y,
+                        item.collisionBounds.width / 2,
+                        0xCCCCCC, // Default grey color
+                        1
+                    );
+                }
                 itemVisual.setDepth(0.8); // Draw items below player/enemies but above ground/shadows
                 this.itemVisuals.set(item.id, itemVisual);
             }
@@ -552,8 +625,6 @@ export default class GameScreen extends Phaser.Scene {
 
 
 
-
-
 // Removed: Update Phaser Tile Coordinates Text (moved to HTML)
 
 // --- Update HTML Tile Coordinates ---
@@ -566,6 +637,9 @@ if (this.tileCoordsElement && this.player) {
         if (this.miniMap) {
             this.miniMap.update();
         }
+
+        // --- Update Powerup Counters UI ---
+        this.updatePowerupCountersUI();
 
     } // End of update method
 
@@ -665,6 +739,7 @@ handlePlayerDeath() {
     if (this.plasmaCounterContainerElement) this.plasmaCounterContainerElement.style.display = 'none';
     if (this.miniMap) this.miniMap.hide(); // Use MiniMap's hide method
     if (this.tileCoordsElement) this.tileCoordsElement.style.display = 'none'; // Hide coords
+    if (this.powerupCountersContainerElement) this.powerupCountersContainerElement.style.display = 'none'; // Hide counters
 
     // Create Respawn Button
     this.respawnButton = this.add.text(this.cameras.main.centerX, this.cameras.main.centerY + 50, 'Respawn', {
@@ -782,6 +857,7 @@ respawnPlayer() { // No longer needs death location
     if (this.plasmaCounterContainerElement) this.plasmaCounterContainerElement.style.display = 'flex'; // Use flex as per CSS
     if (this.miniMap) this.miniMap.show(); // Use MiniMap's show method
     if (this.tileCoordsElement) this.tileCoordsElement.style.display = 'block'; // Show coords
+    if (this.powerupCountersContainerElement) this.powerupCountersContainerElement.style.display = 'flex'; // Show counters
 
     // Update UI immediately
     // Update HTML Plasma Counter
@@ -820,52 +896,55 @@ getPlasmas() {
 }
 
 
-// Update enemy visuals including stun effects and flashing
+// Update enemy visuals including stun effects and flashing (Removed Bleed Tint)
 updateEnemyVisuals() {
     this.enemies.forEach(enemy => {
         if (enemy.state === 'dead') return;
-
         const visual = this.enemyVisuals.get(enemy.id);
         if (!visual) return;
 
-        // Check if enemy is in flashing state (from Enemy.js)
+        const defaultColor = (enemy.type === 'ranged_enemy') ? 0xffa500 : 0xff0000;
+
+        // Handle flashing (overrides tint and stun visual)
         if (enemy.isFlashing) {
-            // Apply white flash visual
-            visual.setFillStyle(0xffffff);
-
-            // Scale effect based on how recent the hit was
+            visual.setFillStyle(0xffffff); // White flash
+            visual.isTinted = false; // Ensure tint is off during flash
             const flashProgress = enemy.hitEffectTimer / enemy.hitEffectDuration;
-            const scale = 1.0 + (0.3 * flashProgress); // 1.0 to 1.3 scale
+            const scale = 1.0 + (0.3 * flashProgress);
             visual.setScale(scale);
-        }
-        // If not flashing, check for stun
-        else if (enemy.isStunned) {
-            // Display normal enemy color while stunned
-            // Determine default color based on type
-            const defaultColor = (enemy.type === 'ranged_enemy') ? 0xffa500 : 0xff0000; // Orange for ranged, Red for others
-            visual.setFillStyle(defaultColor); // Use determined default color
-            visual.setScale(1.0); // Normal scale
-
-            // Add confused ring above enemy if not already there
-            if (!enemy.stunEffect) {
-                this.createOrUpdateStunEffect(enemy);
-            } else {
-                // Update stun effect position
-                enemy.stunEffect.setPosition(enemy.x, enemy.y - 30);
+            if (enemy.stunEffect) { // Remove stun visual if flashing starts
+                if (enemy.stunEffect.active) enemy.stunEffect.destroy();
+                enemy.stunEffect = null;
             }
-        }
-        // Otherwise, reset to default appearance
-        else {
-            // Determine default color based on type when resetting
-            const defaultColor = (enemy.type === 'ranged_enemy') ? 0xffa500 : 0xff0000; // Orange for ranged, Red for others
-            visual.setFillStyle(defaultColor); // Use determined default color
-            visual.setScale(1.0); // Normal scale
+        } else {
+            // Not flashing: Reset fill color and scale
+            visual.setFillStyle(defaultColor);
+            visual.setScale(1.0);
             visual.setAlpha(1);
 
-            // Remove stun effect if it exists
-            if (enemy.stunEffect) {
-                enemy.stunEffect.destroy();
-                enemy.stunEffect = null;
+            // // Bleeding Tint Logic Removed
+            // if (enemy.isBleeding) {
+            //     visual.tint = 0xff0000;
+            //     visual.tintFill = true;
+            //     visual.isTinted = true;
+            // } else {
+            //     visual.isTinted = false;
+            // }
+            visual.isTinted = false; // Ensure tint is always considered false
+            // visual.clearTint(); // Rectangles don't have clearTint, fillStyle is reset above
+
+            // Handle stun visual (independent of tint, but removed if flashing)
+            if (enemy.isStunned) {
+                if (!enemy.stunEffect || !enemy.stunEffect.active) { // Check if active too
+                    this.createOrUpdateStunEffect(enemy);
+                } else {
+                    enemy.stunEffect.setPosition(enemy.x, enemy.y - 30);
+                }
+            } else { // Not stunned (and not flashing)
+                if (enemy.stunEffect && enemy.stunEffect.active) { // Remove stun visual if no longer stunned and effect exists
+                    enemy.stunEffect.destroy();
+                    enemy.stunEffect = null;
+                }
             }
         }
     });
@@ -963,90 +1042,105 @@ createOrUpdateStunEffect(enemy) {
     }
 };
 
-    // Create impact effect at hit location
-    createImpactEffect(x, y) {
+    // Create impact effect at hit location, potentially scaled by number of hits
+    createImpactEffect(x, y, hits = 1) {
+        const isDoubleHit = hits > 1;
+        const baseColor = isDoubleHit ? 0xffff00 : 0xffffff; // Yellow for double hit, white otherwise
+        const baseAlpha = isDoubleHit ? 0.9 : 0.8;
+        const baseScaleMultiplier = isDoubleHit ? 1.3 : 1.0; // Make double hit slightly larger
+        const baseDurationMultiplier = isDoubleHit ? 1.2 : 1.0; // Make double hit last slightly longer
+
         // Create a circular impact marker
-        const impactCircle = this.add.circle(x, y, 20, 0xffffff, 0.8);
+        const impactCircle = this.add.circle(x, y, 20 * baseScaleMultiplier, baseColor, baseAlpha);
         impactCircle.setDepth(2); // Above most elements
 
         // Create expanding ring
-        const ring = this.add.circle(x, y, 10, 0xffffff, 0);
-        ring.setStrokeStyle(3, 0xffffff, 0.8);
+        const ring = this.add.circle(x, y, 10 * baseScaleMultiplier, baseColor, 0);
+        ring.setStrokeStyle(3 * baseScaleMultiplier, baseColor, baseAlpha);
         ring.setDepth(2);
 
-        // Create multiple particles manually instead of using particle emitter
-        const particleCount = 10;
-        const particles = [];
-
-        for (let i = 0; i < particleCount; i++) {
-            // Create a small white circle as a particle
-            const particle = this.add.circle(x, y, 3, 0xffffff, 0.8);
-            particle.setDepth(2);
-
-            // Random angle and speed
-            const angle = Math.random() * Math.PI * 2;
-            const speed = 50 + Math.random() * 150;
-            const velocityX = Math.cos(angle) * speed;
-            const velocityY = Math.sin(angle) * speed;
-
-            // Add to particles array for cleanup
-            particles.push(particle);
-
-            // Animate each particle
-            this.tweens.add({
-                targets: particle,
-                x: particle.x + velocityX,
-                y: particle.y + velocityY,
-                alpha: 0,
-                scale: 0,
-                duration: 300,
-                ease: 'Power2',
-                onComplete: () => {
-                    particle.destroy();
-                }
-            });
-        }
+        // Removed particle generation for impact effect
 
         // Animate and then destroy the impact effects
         this.tweens.add({
             targets: impactCircle,
             alpha: 0,
-            scale: 1.5,
-            duration: 200,
+            scale: 1.5 * baseScaleMultiplier * (1 + (hits - 1) * 0.2), // Combine base scale and multi-hit scale
+            duration: 200 * baseDurationMultiplier, // Adjust duration
             ease: 'Power2',
             onComplete: () => {
-                impactCircle.destroy();
+                if (impactCircle.active) impactCircle.destroy(); // Check if active before destroying
             }
         });
 
         this.tweens.add({
             targets: ring,
-            scaleX: 4,
-            scaleY: 4,
+            scaleX: 4 * baseScaleMultiplier * (1 + (hits - 1) * 0.2), // Combine base scale and multi-hit scale
+            scaleY: 4 * baseScaleMultiplier * (1 + (hits - 1) * 0.2), // Combine base scale and multi-hit scale
             alpha: 0,
-            duration: 300,
+            duration: 300 * baseDurationMultiplier, // Adjust duration
             ease: 'Power2',
             onComplete: () => {
-                ring.destroy();
+                if (ring.active) ring.destroy(); // Check if active before destroying
             }
         });
 
-        // Add screen shake effect
-        this.cameras.main.shake(100, 0.01);
+        // Screen shake is now handled specifically on player hit
     }
 
     // --- Projectile Creation ---
     createProjectile(x, y, direction, speed, damage, ownerId, type = 'projectile') {
         // Create the logical projectile instance
-        const projectile = new Projectile(x, y, direction, speed, damage, ownerId, { type: type });
+        // Pass options object correctly
+        const projectile = new Projectile(x, y, direction, speed, damage, ownerId, type, {}); // Pass type in constructor, empty options obj
         this.projectiles.push(projectile);
 
-        // Create the visual representation (e.g., a small circle)
-        const visual = this.add.circle(x, y, 5, 0xffff00); // Yellow color for projectiles
-        visual.setDepth(1.5); // Draw above player/enemies but below UI/debug
+        // Create the visual representation using the preloaded bullet image
+        const visual = this.add.image(x, y, 'bullet');
+        visual.rotation = Math.atan2(direction.y, direction.x);
+        visual.texture.setFilter(Phaser.Textures.FilterMode.NEAREST);
+        visual.setDepth(1.5);
         this.projectileVisuals.set(projectile.id, visual);
 
         console.log(`Created projectile ${projectile.id} of type ${type} at (${x.toFixed(0)}, ${y.toFixed(0)}) owned by ${ownerId}`);
+        return projectile;
+    }
+
+    // --- NEW: Railgun Projectile Creation ---
+    createRailgunProjectile(x, y, directionX, directionY, damage, speed, chargeRatio) {
+        const direction = { x: directionX, y: directionY }; // Ensure direction is an object
+
+        // Create the logical railgun projectile instance
+        const projectile = new RailgunProjectile(x, y, direction, speed, damage, this.player.id, chargeRatio, {}); // Pass empty options obj
+        this.projectiles.push(projectile);
+
+        // Create the visual representation (using bullet for now, maybe scaled/tinted)
+        // TODO: Use a dedicated railgun beam asset if available
+        const visual = this.add.image(x, y, 'plasma_bullet'); // Use the new plasma bullet image
+        visual.rotation = Math.atan2(direction.y, direction.x);
+        visual.texture.setFilter(Phaser.Textures.FilterMode.NEAREST);
+
+        // Scale visual based on chargeRatio (e.g., thicker beam for full charge)
+        // Double the base scale and the charge-based scaling
+        const scaleX = (1.0 + chargeRatio * 2.0) * 2.0; // Length scales more with charge, then doubled
+        const scaleY = (0.5 + chargeRatio * 0.8) * 2.0; // Width scales less, then doubled
+        visual.setScale(scaleX, scaleY);
+
+        // Tint based on charge (e.g., brighter/whiter for full charge)
+        const blueIntensity = 155 + Math.floor(100 * chargeRatio); // 155 to 255
+        const greenIntensity = 100 + Math.floor(155 * chargeRatio); // 100 to 255
+        const tintColor = Phaser.Display.Color.GetColor(255, greenIntensity, blueIntensity); // White-cyan-ish
+        visual.setTint(tintColor);
+
+        // Add a subtle glow, stronger with charge
+        const glowIntensity = 0.5 + chargeRatio * 0.5; // 0.5 to 1.0
+        visual.postFX.addGlow(tintColor, glowIntensity, 0, false, 0.1, 5 + chargeRatio * 5);
+
+
+        visual.setDepth(1.6); // Slightly above normal projectiles?
+        this.projectileVisuals.set(projectile.id, visual);
+
+        console.log(`Created RAILGUN projectile ${projectile.id} at (${x.toFixed(0)}, ${y.toFixed(0)}) with charge ${chargeRatio.toFixed(2)}`);
         return projectile;
     }
 
@@ -1067,6 +1161,80 @@ createOrUpdateStunEffect(enemy) {
                 trailMarker.destroy();
             }
         });
+    }
+
+    // --- Speed Trail Effect ---
+    createSpeedTrailEffect(x, y, stacks, velocityX, velocityY) {
+        const maxStacks = 15; // Max stacks for speed boost
+        const intensity = Math.min(1, stacks / maxStacks); // Normalize stacks (0 to 1)
+
+        // Base properties
+        const baseAlpha = 0.3;
+        const baseLength = 20; // Length of the streak
+        const baseWidth = 4;   // Width of the streak
+        const baseDuration = 350; // ms
+
+        // Scale properties based on intensity
+        const trailAlpha = baseAlpha + intensity * 0.5; // Alpha from 0.3 to 0.8
+        const trailLength = baseLength + intensity * 15; // Length from 20 to 35
+        const trailWidth = baseWidth + intensity * 2;   // Width from 4 to 6
+        const trailDuration = baseDuration - intensity * 100; // Duration from 350ms to 250ms
+
+        // Calculate movement angle and normalized direction
+        let angle = 0;
+        let normX = 0;
+        let normY = 0;
+        const length = Math.sqrt(velocityX * velocityX + velocityY * velocityY);
+        if (length > 0) {
+            angle = Math.atan2(velocityY, velocityX);
+            normX = velocityX / length;
+            normY = velocityY / length;
+        }
+
+        // Calculate perpendicular direction for offset
+        const perpX = -normY;
+        const perpY = normX;
+        const offsetDistance = 8; // Distance for side streaks
+
+        // Create the three streaks
+        // Add lengthMultiplier and alphaMultiplier parameters
+        const createStreak = (offsetX, offsetY, lengthMultiplier, alphaMultiplier) => {
+            const streakX = x + perpX * offsetX;
+            const streakY = y + perpY * offsetY;
+
+            // Apply multipliers to base values
+            const currentTrailLength = trailLength * lengthMultiplier;
+            const currentTrailAlpha = trailAlpha * alphaMultiplier;
+
+            const trailMarker = this.add.rectangle(
+                streakX, streakY,
+                currentTrailLength, // Use calculated length
+                trailWidth,  // Use width for height parameter
+                0xffffff,    // White color
+                currentTrailAlpha // Use calculated alpha
+            );
+            trailMarker.setDepth(0.5); // Below player
+            trailMarker.setRotation(angle); // Rotate the streak to match movement direction
+
+            // Fade and disappear
+            this.tweens.add({
+                targets: trailMarker,
+                alpha: 0,
+                scaleX: 0.1, // Shrink the length as it fades
+                duration: trailDuration,
+                ease: 'Power1', // Linear fade out
+                onComplete: () => {
+                    trailMarker.destroy();
+                }
+            });
+        };
+
+        // Create center, left, and right streaks
+        const sideLengthMultiplier = 0.6; // Side streaks are 60% length
+        const sideAlphaMultiplier = 0.7;  // Side streaks have 70% alpha
+        createStreak(0, 0, 1, 1); // Center (full length and alpha)
+        createStreak(offsetDistance, offsetDistance, sideLengthMultiplier, sideAlphaMultiplier); // Left/Top side (shorter, weaker)
+        createStreak(-offsetDistance, -offsetDistance, sideLengthMultiplier, sideAlphaMultiplier); // Right/Bottom side (shorter, weaker)
     }
     // 3. Enhanced Knockback - Apply it independently of physics
     // Add this helper method to GameScreen.js
@@ -1118,12 +1286,14 @@ createOrUpdateStunEffect(enemy) {
     }
 
     // 4. Enhanced Hit-Stop Effect - Scale with damage
-    // Add this to GameScreen.js
-    applyHitStop(attacker, target, damage) {
+    // Add this to GameScreen.js, now accepting hits parameter
+    applyHitStop(attacker, target, baseDamagePerHit, hits = 1) {
         // Scale hit-stop duration with damage (min 50ms, max 150ms)
         const baseDuration = 50;
         const maxDuration = 150;
-        const damageScale = Math.min(1.0, damage / 100); // Normalized damage factor (100 damage = max duration)
+        // Scale duration based on number of hits and base damage per hit
+        const totalDamageFactor = baseDamagePerHit * hits;
+        const damageScale = Math.min(1.0, totalDamageFactor / 100); // Normalize based on total potential damage in the flurry
         
         const hitStopDuration = baseDuration + (maxDuration - baseDuration) * damageScale;
         
@@ -1257,15 +1427,201 @@ createOrUpdateStunEffect(enemy) {
         // this.cameras.main.shake(80, 0.008);
     }
     // --- End Melee Hit Effect ---
+
+    // --- Bleed Damage Indicator ---
+    createBleedDamageIndicator(x, y, damageAmount) {
+        // Create text for the damage number
+        const damageText = this.add.text(x, y - 20, `-${damageAmount}`, {
+            fontFamily: 'Arial',
+            fontSize: '18px',
+            color: '#ff0000', // Red color (Previously for bleed, now unused)
+            stroke: '#000000',
+            strokeThickness: 3,
+            align: 'center'
+        });
+        damageText.setOrigin(0.5);
+        damageText.setDepth(3); // Above most things
+
+        // Animate the text: move up and fade out
+        this.tweens.add({
+            targets: damageText,
+            y: y - 50, // Move upwards
+            alpha: 0,
+            duration: 800, // Lasts a bit longer than standard impact
+            ease: 'Power1',
+            onComplete: () => {
+                if (damageText.active) damageText.destroy();
+            }
+        });
+    }
+    // --- End Bleed Damage Indicator ---
+
+    // --- Bleed Particle Effect ---
+    createBleedParticleEffect(x, y) {
+        const particleCount = 3; // Fewer particles for a drip effect
+        const duration = 600; // How long particles last
+        const gravity = 150; // Pixels per second squared (simulated gravity)
+        const horizontalSpread = 50; // Max horizontal speed
+
+        for (let i = 0; i < particleCount; i++) {
+            // Create a small red circle particle
+            const particle = this.add.circle(x, y, Phaser.Math.Between(2, 4), 0xff0000, 0.8);
+            particle.setDepth(1.9); // Above most things, slightly below damage text
+
+            // Initial horizontal velocity
+            const initialVelocityX = Phaser.Math.FloatBetween(-horizontalSpread, horizontalSpread);
+            const initialVelocityY = Phaser.Math.FloatBetween(-20, 20); // Slight initial upward pop
+
+            // Animate particle: move down with gravity, fade out
+            this.tweens.add({
+                targets: particle,
+                props: {
+                    y: {
+                        value: `+=${gravity * (duration / 1000)}`, // Approximate final Y based on duration
+                        ease: 'Quad.easeIn' // Simulate acceleration due to gravity
+                    },
+                    x: {
+                        value: `+=${initialVelocityX * (duration / 1000)}`, // Horizontal drift
+                        ease: 'Linear'
+                    },
+                    alpha: {
+                        value: 0,
+                        duration: duration * 0.8, // Start fading later
+                        delay: duration * 0.2,
+                        ease: 'Power1'
+                    },
+                    scale: {
+                        value: 0, // Shrink as it fades
+                        duration: duration,
+                        ease: 'Power1'
+                    }
+                },
+                duration: duration,
+                onComplete: () => {
+                    if (particle.active) particle.destroy();
+                }
+            });
+        }
+    }
+    // --- End Bleed Particle Effect ---
+
+    // --- Powerup Selection Flow ---
+
+    // Define available powerups here for GameScreen to access
+    // This list MUST match the options in PowerupSelectionScreen.js for maxStacks lookup
+    availablePowerups = [
+        { type: 'speed_boost', text: 'Speed Boost (5% per stack, max 15)', maxStacks: 15 },
+        // { type: 'bleeding', text: 'Bleeding Hit (5 + 2/stack DPS for 3s, max 5)', maxStacks: 5 }, // Removed Bleeding Powerup
+        // { type: 'fire_rate_boost', text: 'Fire Rate Boost (8% per stack, max 5)', maxStacks: 5 }, // Removed
+        { type: 'health_increase', text: 'Max Health +20 (per stack, max 5)', maxStacks: 5 },
+    ];
+
+    openPowerupSelection() {
+        if (!this.scene.isActive('PowerupSelectionScreen')) {
+            console.log("Pausing GameScreen and launching PowerupSelectionScreen...");
+            // Pause this scene's physics and updates
+            this.physics.pause();
+            this.scene.pause();
+            // Launch the selection screen, passing this scene as the parent
+            this.scene.launch('PowerupSelectionScreen', { parentScene: this });
+        } else {
+            console.log("PowerupSelectionScreen is already active.");
+        }
+    }
+
+    applySelectedPowerup(powerupType) {
+        console.log(`GameScreen: Applying selected powerup - Type: ${powerupType}`);
+
+        if (!this.player || !this.player.powerupManager) {
+            console.error("Cannot apply powerup: Player or PowerupManager not found.");
+            this.resumeGameScreen(); // Resume even if failed
+            return;
+        }
+
+        // Find the full definition of the selected powerup
+        const powerupDefinition = this.availablePowerups.find(p => p.type === powerupType);
+
+        if (!powerupDefinition) {
+             console.error(`Powerup definition not found for type: ${powerupType}`);
+             this.resumeGameScreen(); // Resume even if failed
+             return;
+        }
+
+        // Create a new Powerup instance
+        // Note: Powerups don't need x/y coordinates as they are applied directly
+        const newPowerup = new Powerup(this, 0, 0, powerupDefinition.type, {
+            maxStacks: powerupDefinition.maxStacks
+        });
+
+        // Add the powerup to the player's manager
+        this.player.powerupManager.addPowerup(newPowerup);
+
+        // No need to call resumeGameScreen here, it's called by PowerupSelectionScreen's closeScreen
+        console.log(`Powerup ${powerupType} applied to player.`);
+    }
+
+    resumeGameScreen() {
+        console.log("Resuming GameScreen...");
+        // Ensure the selection screen is stopped if it hasn't already
+        if (this.scene.isActive('PowerupSelectionScreen')) {
+             this.scene.stop('PowerupSelectionScreen');
+        }
+        // Resume this scene's physics and updates
+        this.physics.resume();
+        this.scene.resume();
+
+        // Clear the input handler state to forget any keys released while paused
+        if (this.inputHandler) {
+            this.inputHandler.clearStateOnResume();
+        }
+    }
+
+    updatePowerupCountersUI() {
+        if (!this.player || !this.player.powerupManager || !this.powerupCountersContainerElement) {
+            return;
+        }
+
+        const activePowerups = this.player.powerupManager.activePowerups;
+
+        // Iterate over the UI elements we know about
+        for (const type in this.powerupCounterElements) {
+            const elements = this.powerupCounterElements[type];
+            const powerupData = activePowerups.get(type);
+
+            if (powerupData && powerupData.stacks > 0) {
+                // Powerup is active, update text and show container
+                elements.container.style.display = 'flex'; // Show this specific counter
+                // Customize text based on type
+                let textContent = '';
+                switch (type) {
+                    case 'speed_boost':
+                        textContent = `Speed x ${powerupData.stacks}`;
+                        break;
+                    // case 'bleeding': // Removed Bleeding UI Update Case
+                    //     textContent = `Bleed x ${powerupData.stacks}`;
+                    //     break;
+                    case 'fire_rate_boost':
+                        textContent = `Fire Rate x ${powerupData.stacks}`;
+                        break;
+                    case 'health_increase':
+                        textContent = `Max HP x ${powerupData.stacks}`;
+                        break;
+                    // Add cases for other powerup types here
+                    default:
+                        textContent = `${type.replace('_', ' ')} x ${powerupData.stacks}`;
+                }
+                elements.text.innerText = textContent;
+            } else {
+                // Powerup is not active, hide container
+                elements.container.style.display = 'none';
+            }
+        }
+    }
+    // --- End Powerup Selection Flow ---
 // --- Resize Handler ---
 handleResize(gameSize) {
     // gameSize contains width and height properties
-    if (this.debugOverlay) {
-        this.debugOverlay.setSize(gameSize.width, gameSize.height);
-        // Recenter the overlay (since its origin is 0.5, 0.5)
-        this.debugOverlay.setPosition(gameSize.width / 2, gameSize.height / 2);
-        this.cameras.main.setSize(gameSize.width, gameSize.height); // Explicitly resize camera
-    }
+    this.cameras.main.setSize(gameSize.width, gameSize.height); // Explicitly resize camera
     // Optional: You might need to resize/reposition other fixed UI elements here too
 }
 // --- End Resize Handler ---
@@ -1312,6 +1668,10 @@ shutdown() {
         if (this.tileCoordsElement) {
              this.tileCoordsElement.style.display = 'none';
         }
+        // Hide powerup counters on shutdown
+        if (this.powerupCountersContainerElement) {
+            this.powerupCountersContainerElement.style.display = 'none';
+        }
 
         // Release references
         this.player = null;
@@ -1330,4 +1690,25 @@ shutdown() {
         this.projectiles = []; // Clear the projectile array
 
     }
+
+    // --- NEW: Continuous Screen Shake Methods ---
+    startContinuousShake(intensity = 0.005, duration = Infinity) {
+        if (!this.isShakingContinuously && this.cameras && this.cameras.main) {
+            console.log("Starting continuous screen shake...");
+            this.isShakingContinuously = true;
+            // Start an infinite shake effect
+            this.cameras.main.shake(duration, intensity, false); // duration, intensity, force
+        }
+    }
+
+    stopContinuousShake() {
+        if (this.isShakingContinuously && this.cameras && this.cameras.main) {
+            console.log("Stopping continuous screen shake...");
+            this.isShakingContinuously = false;
+            // Stop the shake effect by shaking with zero intensity/duration
+            this.cameras.main.shake(0, 0, true); // duration=0, intensity=0, force=true to stop immediately
+        }
+    }
+    // --- End Continuous Screen Shake Methods ---
+
 } // End of GameScreen class

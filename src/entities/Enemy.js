@@ -5,7 +5,7 @@ export class Enemy extends Entity {
         // Default enemy options
         const enemyOptions = {
             type: 'enemy',
-            maxHealth: options.maxHealth || 2,
+            maxHealth: options.maxHealth || 50,
             friction: options.friction || 0.9, // Moderate friction
             collisionBounds: options.collisionBounds || { x: 0, y: 0, width: 40, height: 40 }, // Slightly smaller than player
             ...options,
@@ -59,6 +59,14 @@ export class Enemy extends Entity {
         this.flankOffsetDistance = 150; // Pixels to offset for flanking
         this.flankUpdateTimer = 0;
         this.flankUpdateInterval = 1.0 + Math.random(); // Re-evaluate flank side every 1-2 seconds
+
+        // Bleeding effect properties
+        // Bleed Properties Removed
+        // this.isBleeding = false;
+        // this.bleedDPS = 0;
+        // this.bleedDurationTimer = 0;
+        // this.bleedTickTimer = 0;
+        // this.bleedTickInterval = 0.25;
     }
 
     update(deltaTime, worldContext) {
@@ -101,6 +109,8 @@ export class Enemy extends Entity {
                 this.stunEffectIntensity *= Math.pow(this.stunEffectDecayRate, deltaTime * 10);
             }
 
+            // // Bleed update call removed from stun logic
+            // this.updateBleed(deltaTime);
             super.update(deltaTime);
             return;
         }
@@ -240,6 +250,9 @@ if (worldContext && worldContext.projectiles && this.avoidanceTimer <= 0 && this
     }
 }
 // --- End Friendly Fire Avoidance ---
+
+// Update Bleed Effect
+// this.updateBleed(deltaTime); // Removed Bleed Update Call
 
 // Call parent update for physics, animation, etc. (applies velocity including separation and avoidance)
 super.update(deltaTime);
@@ -456,6 +469,62 @@ super.update(deltaTime);
         this.isStunned = false;
         this.stunEffectIntensity = 0;
 
-        // Could add particle effects, drop items, etc.
+        // --- Powerup Drop Logic ---
+        const dropChance = 0.10; // 10% chance to drop a powerup
+        if (Math.random() < dropChance) {
+            if (this.scene && this.scene.powerupManager) {
+                console.log(`Enemy ${this.id} dropping powerup at (${this.x.toFixed(0)}, ${this.y.toFixed(0)})`);
+                this.scene.powerupManager.spawnPowerup(this.x, this.y);
+            } else {
+                console.warn(`Enemy ${this.id}: Cannot drop powerup - scene or powerupManager not found.`);
+            }
+        }
+        // --- End Powerup Drop Logic ---
+
+        // Could add particle effects, etc.
     }
+
+    // --- applyBleed Method Removed ---
+    // applyBleed(dps, duration) { ... }
+
+    // --- updateBleed Method Removed ---
+    // updateBleed(deltaTime) {
+    //     if (!this.isBleeding || this.state === 'dead') {
+    //         return;
+    //     }
+    //
+    //     if (this.bleedDurationTimer > 0) {
+    //         this.bleedDurationTimer -= deltaTime;
+    //
+    //         // Apply damage proportionally to deltaTime
+    //         const damageThisFrame = this.bleedDPS * deltaTime;
+    //         super.takeDamage(damageThisFrame);
+    //
+    //         // Visual tick timer
+    //         this.bleedTickTimer -= deltaTime;
+    //         if (this.bleedTickTimer <= 0) {
+    //             this.bleedTickTimer = this.bleedTickInterval;
+    //             // Trigger visual damage indicator in GameScreen
+    //             if (this.scene && typeof this.scene.createBleedDamageIndicator === 'function') {
+    //                 // Also trigger dripping particle effect
+    //                 if (typeof this.scene.createBleedParticleEffect === 'function') {
+    //                     // this.scene.createBleedParticleEffect(this.x, this.y); // Removed
+    //                 }
+    //                 // this.scene.createBleedDamageIndicator(this.x, this.y, Math.ceil(this.bleedDPS * this.bleedTickInterval)); // Removed
+    //             }
+    //         }
+    //
+    //
+    //         if (this.bleedDurationTimer <= 0) {
+    //             console.log(`Enemy ${this.id} bleed ended.`);
+    //             this.isBleeding = false;
+    //             this.bleedDPS = 0;
+    //             this.bleedDurationTimer = 0;
+    //         }
+    //     } else {
+    //          // Safety cleanup if timer is somehow <= 0 but flag is true
+    //          this.isBleeding = false;
+    //          this.bleedDPS = 0;
+    //     }
+    // }
 }
