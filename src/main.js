@@ -3,15 +3,14 @@ import GameScreen from './scenes/GameScreen.js';
 
 const config = {
     type: Phaser.AUTO, // Use WebGL if available, otherwise Canvas
-    width: 640,
-    height: 360,
+    // width and height are managed by the scale manager (RESIZE mode)
     parent: 'phaser-game', // ID of the div to contain the game
     pixelArt: false, // Disable pixel art for smoother scaling
     physics: {
         default: 'arcade',
         arcade: {
             gravity: { y: 0 }, // No gravity needed for a start screen
-            debug: false
+            debug: true
         }
     },
     scale: {

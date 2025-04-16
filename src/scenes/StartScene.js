@@ -98,7 +98,7 @@ export default class StartScreen extends Phaser.Scene {
     handleResize(gameSize) {
         const width = gameSize.width;
         const height = gameSize.height;
-        this.cameras.resize(width, height);
+        // this.cameras.resize(width, height); // Let Scale Manager handle this
 
         // Re-scale background
         this.resizeBackground(width, height);
@@ -116,5 +116,11 @@ export default class StartScreen extends Phaser.Scene {
         if (this.instructionText) {
             this.instructionText.setPosition(width / 2, height / 2 + 80);
         }
+    }
+
+    shutdown() {
+        // Remove the resize listener when the scene shuts down
+        this.scale.off('resize', this.handleResize, this);
+        console.log("StartScreen shutdown complete, resize listener removed."); // Optional: for debugging
     }
 }

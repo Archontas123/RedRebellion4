@@ -167,6 +167,25 @@ export default class GameScreen extends Phaser.Scene {
             console.error("Failed to initialize MiniMap: Required components missing.");
         }
 
+        // --- Blue Debug Tint Overlay ---
+        this.debugOverlay = this.add.rectangle(
+            this.cameras.main.centerX,
+            this.cameras.main.centerY,
+            this.cameras.main.width,
+            this.cameras.main.height,
+            0x0000ff, // Blue color
+            0.2 // Semi-transparent alpha
+        );
+        this.debugOverlay.setScrollFactor(0); // Keep fixed to camera
+        this.debugOverlay.setDepth(10); // Draw above game, below critical UI
+        // --- End Blue Debug Tint Overlay ---
+
+        // --- Resize Handler for Overlay ---
+        this.scale.on('resize', this.handleResize, this);
+        // --- End Resize Handler ---
+
+        // Force a scale refresh after scene creation to ensure dimensions are correct
+        this.scale.refresh();
     }
 
     update(time, delta) {
@@ -1238,8 +1257,20 @@ createOrUpdateStunEffect(enemy) {
         // this.cameras.main.shake(80, 0.008);
     }
     // --- End Melee Hit Effect ---
+// --- Resize Handler ---
+handleResize(gameSize) {
+    // gameSize contains width and height properties
+    if (this.debugOverlay) {
+        this.debugOverlay.setSize(gameSize.width, gameSize.height);
+        // Recenter the overlay (since its origin is 0.5, 0.5)
+        this.debugOverlay.setPosition(gameSize.width / 2, gameSize.height / 2);
+        this.cameras.main.setSize(gameSize.width, gameSize.height); // Explicitly resize camera
+    }
+    // Optional: You might need to resize/reposition other fixed UI elements here too
+}
+// --- End Resize Handler ---
 
-    shutdown() {
+shutdown() {
         console.log("Shutting down GameScreen..."); // Added console log back for consistency
 
         // Hide the HTML health bar when the scene shuts down
@@ -1261,6 +1292,9 @@ createOrUpdateStunEffect(enemy) {
             this.worldManager.destroy();
             this.worldManager = null;
         }
+
+        // Remove resize listener
+        this.scale.off('resize', this.handleResize, this);
 
         // Destroy EnemyManager
         if (this.enemyManager) {
