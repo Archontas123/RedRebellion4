@@ -31,9 +31,9 @@ export const TILE_TYPES = {
 
 // Define Tile Colors (can be moved to a constants file or WorldManager later)
 export const COLORS = {
-    NORMAL_GROUND: 0x3c2210,        // Dark brown
-    LIGHT_GROUND: 0x7c4c20,         // Light brown
-    ELEVATED_GROUND: 0x291708,      // Very dark brown
-    LIGHT_NORMAL_TRANSITION: 0x5c3618, // Medium brown (transition)
-    ELEVATED_TRANSITION: 0x402a12   // Dark medium brown (transition)
+    NORMAL_GROUND: 0xc1440e,        // Rusty red
+    LIGHT_GROUND: 0xe27b58,         // Light orange-red
+    ELEVATED_GROUND: 0x83280b,      // Dark rusty brown
+    LIGHT_NORMAL_TRANSITION: 0xd25a2b, // Medium rust
+    ELEVATED_TRANSITION: 0x9e340c   // Dark red-brown
 };

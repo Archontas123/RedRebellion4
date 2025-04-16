@@ -46,6 +46,7 @@ export default class GameScreen extends Phaser.Scene {
         graphics.destroy(); // Destroy after generating
 
         // Removed health_gradient texture generation
+
     }
 
     create() {
@@ -165,6 +166,7 @@ export default class GameScreen extends Phaser.Scene {
         } else {
             console.error("Failed to initialize MiniMap: Required components missing.");
         }
+
     }
 
     update(time, delta) {
@@ -545,6 +547,7 @@ if (this.tileCoordsElement && this.player) {
         if (this.miniMap) {
             this.miniMap.update();
         }
+
     } // End of update method
 
     // --- Collision Resolution Method ---
@@ -1291,5 +1294,6 @@ createOrUpdateStunEffect(enemy) {
         this.projectileVisuals.forEach(visual => visual.destroy());
         this.projectileVisuals.clear();
         this.projectiles = []; // Clear the projectile array
+
     }
 } // End of GameScreen class
