@@ -109,6 +109,12 @@ export class Player extends Entity {
      // this.recoilTimer = 0;
      // this.recoilDuration = 0.25; // Duration of reduced friction (seconds)
      // this.recoilFriction = 0.98; // Lower friction during recoil
+
+        // Turret Destruction properties
+        this.turretDestroyRange = (options.tileSize || 50) * 1.5; // 1.5 tiles range
+        this.turretDestroyHoldTime = 1.0; // seconds to hold B (Reduced from 2.0)
+        this.turretDestroyTimer = 0;
+        this.nearbyTurret = null; // Track the turret being destroyed
  }
 
     // onMouseMove, onMouseDown, onMouseUp removed - Handled by InputHandler via scene
@@ -212,6 +218,12 @@ if (this.isMoving && this.speedBoostStacks > 0 && this.scene && typeof this.scen
     this.scene.createSpeedTrailEffect(this.x, this.y, this.speedBoostStacks, this.velocityX, this.velocityY);
 }
         // Speed trail effect removed
+
+        // --- NEW: Update Turret Destruction Logic ---
+        this.updateTurretDestruction(deltaTime);
+
+        // --- NEW: Update Turret Destruction Logic ---
+        this.updateTurretDestruction(deltaTime);
     }
 
     processInput() {
@@ -290,7 +302,13 @@ if (this.isMoving && this.speedBoostStacks > 0 && this.scene && typeof this.scen
                 this.fireRailgun(); // fireRailgun will check charge level
             }
         }
+
+        // Turret Destruction Input (handled in updateTurretDestruction)
+        // We check input there to avoid interfering with other actions like dash/attack
     }
+
+    // Turret Destruction Input (handled in updateTurretDestruction)
+    // We check input there to avoid interfering with other actions like dash/attack
 
     // --- NEW: Weapon Swap Method ---
     swapWeapon() {
@@ -616,7 +634,7 @@ handleCollision(otherEntity) {
     if (this.isAttacking) {
         console.log(`Player attacking, collided with: ${otherEntity?.id} (Type: ${otherEntity?.type})`);
         // Check if the other entity is any type of enemy
-        if (otherEntity?.type === 'enemy' || otherEntity?.type === 'ranged_enemy') {
+        if (otherEntity?.type === 'enemy' || otherEntity?.type === 'ranged_enemy' || otherEntity?.type === 'engineer' || otherEntity?.type === 'drone_enemy') { // Added 'drone_enemy'
              console.log(`>>> Enemy collision detected during attack! Applying effects to ${otherEntity.id}`);
              // Ensure enemy is not already dead AND hasn't been hit by this attack yet
              if (otherEntity.state !== 'dead' && !this.enemiesHitThisAttack.has(otherEntity.id)) {
@@ -841,5 +859,94 @@ updateCurrentTileCoords() {
         }
 
         super.destroy();
+    }
+
+    // --- NEW: Turret Destruction Logic ---
+    updateTurretDestruction(deltaTime) {
+        // Don't process if dashing, attacking, or dead
+        if (this.isDashing || this.isAttacking || this.state === 'dead') {
+            this.resetTurretDestruction();
+            return;
+        }
+
+        // Check if 'B' key is held down
+        if (this.inputHandler.isDown('KeyB')) {
+            // Find the closest turret within range
+            let closestTurret = null;
+            let minDistanceSq = this.turretDestroyRange * this.turretDestroyRange;
+
+            if (this.scene && this.scene.enemies) {
+                for (const enemy of this.scene.enemies) {
+                    // Check if it's a TurretEnemy and alive
+                    if (enemy.constructor.name === 'TurretEnemy' && enemy.state !== 'dead') {
+                        const dx = enemy.x - this.x;
+                        const dy = enemy.y - this.y;
+                        const distanceSq = dx * dx + dy * dy;
+
+                        if (distanceSq < minDistanceSq) {
+                            minDistanceSq = distanceSq;
+                            closestTurret = enemy;
+                        }
+                    }
+                }
+            }
+
+            // If a turret is in range
+            if (closestTurret) {
+                // If it's a different turret than before, reset timer
+                if (this.nearbyTurret !== closestTurret) {
+                    this.resetTurretDestruction();
+                    this.nearbyTurret = closestTurret;
+                    console.log(`Player started interacting with Turret ${this.nearbyTurret.id}`);
+                    // --- NEW: Show visual indicator ---
+                    if (typeof this.nearbyTurret.showDestructionIndicator === 'function') {
+                        this.nearbyTurret.showDestructionIndicator();
+                    }
+                }
+
+                // Increment timer
+                this.turretDestroyTimer += deltaTime;
+                // --- NEW: Update visual indicator ---
+                if (typeof this.nearbyTurret.updateDestructionIndicator === 'function') {
+                    const progress = Math.min(this.turretDestroyTimer / this.turretDestroyHoldTime, 1.0);
+                    this.nearbyTurret.updateDestructionIndicator(progress);
+                }
+
+                // Check if hold time is reached
+                if (this.turretDestroyTimer >= this.turretDestroyHoldTime) {
+                    console.log(`Player destroyed Turret ${this.nearbyTurret.id}`);
+                    if (typeof this.nearbyTurret.destroyTurret === 'function') {
+                        this.nearbyTurret.destroyTurret(); // Call the turret's destruction method
+                    } else {
+                        // Fallback: Call generic destroy or onDeath if specific method doesn't exist
+                        if (typeof this.nearbyTurret.destroy === 'function') {
+                            this.nearbyTurret.destroy();
+                        } else if (typeof this.nearbyTurret.onDeath === 'function') {
+                            this.nearbyTurret.onDeath();
+                        }
+                    }
+                    this.resetTurretDestruction(); // Reset after destruction
+                    // TODO: Add visual effect for destruction completion
+                }
+            } else {
+                // No turret in range, reset
+                this.resetTurretDestruction();
+            }
+        } else {
+            // 'B' key not held, reset
+            this.resetTurretDestruction();
+        }
+    }
+
+    resetTurretDestruction() {
+        if (this.nearbyTurret) {
+            console.log(`Player stopped interacting with Turret ${this.nearbyTurret.id}`);
+            // --- NEW: Hide visual indicator ---
+            if (typeof this.nearbyTurret.hideDestructionIndicator === 'function') {
+                this.nearbyTurret.hideDestructionIndicator();
+            }
+        }
+        this.turretDestroyTimer = 0;
+        this.nearbyTurret = null;
     }
 }

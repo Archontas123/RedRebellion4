@@ -28,9 +28,12 @@ export class RailgunProjectile extends Projectile {
         if (otherEntity.type.includes('projectile') || otherEntity.type === 'plasma' || otherEntity.type === 'powerup') {
              return;
         }
+// --- DEBUG LOG ---
+console.log(`[RailgunProjectile ${this.id}] Collision with ID: ${otherEntity.id}, Type: '${otherEntity.type}'`);
+// --- END DEBUG LOG ---
 
-        // Check if it's an enemy type
-        if (otherEntity.type === 'enemy' || otherEntity.type === 'ranged_enemy') {
+// Check if it's an enemy type
+if (otherEntity.type === 'enemy' || otherEntity.type === 'ranged_enemy' || otherEntity.type === 'engineer' || otherEntity.type === 'drone_enemy') { // Added 'drone_enemy'
             console.log(`Railgun Projectile ${this.id} hit Enemy ${otherEntity.id}`);
             otherEntity.takeDamage(this.damage); // Apply damage
 

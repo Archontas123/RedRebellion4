@@ -46,6 +46,9 @@ class Entity {
 
         // Ensure collision bounds match sprite/animation if provided
         this.updateBoundsFromSprite();
+
+        // Visual properties
+        this.color = options.color || 'grey'; // Default fallback color
     }
 
     // --- Health Methods ---
@@ -363,17 +366,20 @@ draw(context) {
     // --- Draw Enhanced Shadow ---
     // Enhanced oval shadow below the entity
     context.fillStyle = 'rgba(0, 0, 0, 0.3)'; // Semi-transparent black
-    context.beginPath();
-    context.ellipse(
-        bounds.x + bounds.width / 2,    // Center X
-        bounds.y + bounds.height,       // Bottom Y
-        bounds.width / 2 * 0.8,         // Radius X (slightly smaller than width)
-        bounds.height / 4,              // Radius Y (flattened)
-        0,                              // Rotation
-        0,                              // Start Angle
-        Math.PI * 2                     // End Angle
-    );
-    context.fill();
+    // Draw shadow using arc and scale for better compatibility
+    const shadowCenterX = bounds.x + bounds.width / 2;
+    const shadowBottomY = bounds.y + bounds.height;
+    const shadowRadiusX = bounds.width / 2 * 0.8;
+    const shadowRadiusY = bounds.height / 4;
+
+    // Use Phaser Graphics API for drawing the ellipse shadow
+    // Note: Phaser Graphics handles transformations internally, so save/restore/translate/scale are not needed here
+    // for simple shape drawing. We directly use fillEllipse with calculated center and radii.
+    if (shadowRadiusX > 0 && shadowRadiusY > 0) {
+        context.fillStyle = 'rgba(0, 0, 0, 0.3)'; // Set fill style property
+        // Phaser's fillEllipse takes center x, center y, width (diameter), height (diameter)
+        context.fillEllipse(shadowCenterX, shadowBottomY, shadowRadiusX * 2, shadowRadiusY * 2);
+    }
     // --- End Draw Shadow ---
 
 
@@ -396,17 +402,23 @@ draw(context) {
 
     // Fallback to basic rectangle if no sprite/animation drawn
     if (!drawn) {
-        // Special handling for stunned enemies - white with pulsing effect
+        // Special handling for stunned enemies - pulse effect blending with original color
         if (this.isStunned && this.type === 'enemy') {
             // Calculate pulsing value (0.7 to 1.0)
             const now = Date.now() / 1000;
-            const pulseValue = 0.7 + (Math.sin(now * 8) + 1) * 0.15;
-            
-            context.fillStyle = `rgba(255, 255, 255, ${pulseValue})`;
+            const pulseValue = 0.7 + (Math.sin(now * 8) + 1) * 0.15; // Ranges roughly 0.7 to 1.0
+
+            // Blend original color with white for stun pulse
+            // Draw base color first
+            context.fillStyle = this.color;
+            context.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+            // Overlay semi-transparent white pulse (adjust 0.6 for intensity)
+            context.fillStyle = `rgba(255, 255, 255, ${pulseValue * 0.6})`;
+            // The fillRect below will draw the white overlay
         } else {
-            context.fillStyle = 'grey'; // Fallback color
+            context.fillStyle = this.color; // Use stored fallback color
         }
-        context.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+        context.fillRect(bounds.x, bounds.y, bounds.width, bounds.height); // Draws base color OR stun overlay
 
         // Draw velocity vector for debugging
         context.strokeStyle = 'blue';

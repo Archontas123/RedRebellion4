@@ -1,5 +1,6 @@
 // src/entities/WorldManager.js
 import Chunk from './Chunk.js';
+import { TILE_TYPES } from './Tile.js'; // Import TILE_TYPES
 
 /**
  * Manages the loading and unloading of world chunks based on player position.
@@ -108,7 +109,11 @@ export default class WorldManager {
             // Adjust for negative modulo result if necessary
             const finalLocalX = localTileX < 0 ? localTileX + this.chunkSize : localTileX;
             const finalLocalY = localTileY < 0 ? localTileY + this.chunkSize : localTileY;
-            return this.loadedChunks[key].getTile(finalLocalX, finalLocalY);
+            // Access the tiles array directly instead of calling a non-existent method
+            if (this.loadedChunks[key].tiles && this.loadedChunks[key].tiles[finalLocalX]) {
+                 return this.loadedChunks[key].tiles[finalLocalX][finalLocalY];
+            }
+            return null; // Tile array or row not found (shouldn't happen if chunk loaded correctly)
         }
 
         return null; // Chunk not loaded
@@ -185,6 +190,67 @@ export default class WorldManager {
 
         return { minX, minY, maxX, maxY, centerX, centerY, width, height };
     }
+    /**
+     * Attempts to find a random valid (walkable and within loaded bounds) world position
+     * within a specified radius range from a center point, while avoiding another point.
+     * @param {number} centerX - The center X coordinate to search around.
+     * @param {number} centerY - The center Y coordinate to search around.
+     * @param {number} minRadius - The minimum distance from the center.
+     * @param {number} maxRadius - The maximum distance from the center.
+     * @param {number} avoidX - The X coordinate of the point to avoid.
+     * @param {number} avoidY - The Y coordinate of the point to avoid.
+     * @param {number} avoidRadius - The minimum distance to maintain from the avoid point.
+     * @param {number} [maxAttempts=20] - Maximum number of attempts to find a valid position.
+     * @returns {{x: number, y: number} | null} The coordinates of a valid position, or null if none found.
+     */
+    findRandomValidPositionNear(centerX, centerY, minRadius, maxRadius, avoidX, avoidY, avoidRadius, maxAttempts = 20) {
+        const loadedBounds = this.getLoadedBounds();
+        if (!loadedBounds) {
+            console.warn("findRandomValidPositionNear: No loaded bounds available.");
+            return null; // Cannot determine validity without bounds
+        }
+
+        const avoidRadiusSq = avoidRadius * avoidRadius;
+
+        for (let i = 0; i < maxAttempts; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const distance = minRadius + Math.random() * (maxRadius - minRadius);
+            const targetX = centerX + Math.cos(angle) * distance;
+            const targetY = centerY + Math.sin(angle) * distance;
+
+            // 1. Check against loaded bounds
+            if (targetX < loadedBounds.minX || targetX > loadedBounds.maxX ||
+                targetY < loadedBounds.minY || targetY > loadedBounds.maxY) {
+                continue; // Outside loaded area
+            }
+
+            // 2. Check against avoidance zone
+            const dxAvoid = targetX - avoidX;
+            const dyAvoid = targetY - avoidY;
+            if (dxAvoid * dxAvoid + dyAvoid * dyAvoid < avoidRadiusSq) {
+                continue; // Too close to the point to avoid
+            }
+
+            // 3. Check if the tile is valid/walkable
+            const { tileX, tileY } = this.worldToTileCoords(targetX, targetY);
+            const tile = this.getTileAt(tileX, tileY);
+
+            // Check walkability based on tile type
+            const walkableTypes = [
+                TILE_TYPES.NORMAL_GROUND,
+                TILE_TYPES.LIGHT_GROUND,
+                TILE_TYPES.LIGHT_NORMAL_TRANSITION
+            ];
+            if (tile && walkableTypes.includes(tile.type)) {
+                 console.log(`findRandomValidPositionNear: Found valid position (type: ${tile.type}) on attempt ${i + 1} at (${targetX.toFixed(0)}, ${targetY.toFixed(0)})`);
+                return { x: targetX, y: targetY }; // Found a valid spot
+            }
+        }
+
+        console.warn(`findRandomValidPositionNear: Failed to find a valid position after ${maxAttempts} attempts.`);
+        return null; // Failed to find a suitable position
+    }
+
 
 
     /**

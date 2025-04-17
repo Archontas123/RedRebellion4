@@ -8,7 +8,10 @@ import { Plasma } from '../entities/Plasma.js'; // Import Plasma
 import MiniMap from '../ui/MiniMap.js'; // Import MiniMap
 import { Projectile } from '../entities/Projectile.js'; // Import Projectile
 import { RailgunProjectile } from '../entities/RailgunProjectile.js'; // <-- NEW IMPORT
+import { DynamiteProjectile } from '../entities/DynamiteProjectile.js'; // Import DynamiteProjectile
 import Powerup from '../entities/Powerup.js'; // Import Powerup
+import WaveManager from '../entities/WaveManager.js'; // Import WaveManager
+import { EngineerEnemy } from '../entities/EngineerEnemy.js'; // Import EngineerEnemy
 export default class GameScreen extends Phaser.Scene {
     constructor() {
         super('GameScreen');
@@ -38,8 +41,17 @@ export default class GameScreen extends Phaser.Scene {
         this.powerupCountersContainerElement = null; // Reference to the main powerup counters div
         this.powerupCounterElements = {}; // Object to hold references to individual counter elements { type: { container: div, text: span } }
         this.isShakingContinuously = false; // <-- NEW: Track continuous shake state
+        this.waveManager = null; // Instance of WaveManager
+        this.waveCounterElement = null; // Reference to the HTML wave counter element
+        this.clearPlasmaButtonElement = null; // Reference to the clear plasma button
+        // this.bossPointerArrow = null; // REMOVED Boss pointer visual
+        this.bossHealthBarContainerElement = null; // Reference to the boss health bar container
+        this.bossHealthBarFillElement = null; // Reference to the boss health bar fill
+        this.bossHealthBarMarkerElement = null; // Reference to the boss health bar halfway marker
+        this.earthquakeZones = []; // Array to hold active earthquake zones
+        this.customProjectileGraphics = null; // Graphics object for projectiles with custom draw
     }
-
+ 
     preload() {
         // --- Create White Dot Texture (existing) ---
         // Use add.graphics for white dot texture as well for consistency
@@ -219,6 +231,14 @@ export default class GameScreen extends Phaser.Scene {
         } else {
             console.error("Powerup counters container element not found in HTML!");
         }
+        // --- Wave Counter UI Setup ---
+        this.waveCounterElement = document.getElementById('wave-counter-display');
+        if (this.waveCounterElement) {
+            this.waveCounterElement.style.display = 'block'; // Show the element
+            // Initial update will be triggered by WaveManager starting the first wave
+        } else {
+            console.error("Wave counter display element not found in HTML!");
+        }
 
         // --- Blue Debug Tint Overlay Removed ---
 
@@ -234,6 +254,55 @@ export default class GameScreen extends Phaser.Scene {
             console.log("Debug: Opening Powerup Selection...");
             this.openPowerupSelection();
         });
+
+        // --- Wave Manager Setup ---
+        this.waveManager = new WaveManager(this, this.enemyManager);
+        this.waveManager.startNextWave(); // Start the first wave
+
+        // --- Debug Key for Clearing Wave ---
+        this.input.keyboard.on('keydown-J', () => {
+            console.log("Debug: Clearing current wave...");
+            if (this.waveManager && this.waveManager.waveActive) {
+                // Iterate through all active enemies and kill them
+                this.enemies.forEach(enemy => {
+                    if (enemy && enemy.state !== 'dead') {
+                        // Use takeDamage with max health to ensure death logic runs (plasma drop, wave manager report)
+                        enemy.takeDamage(enemy.health * 2); // Deal more than enough damage
+                    }
+                });
+                console.log("Debug: All active enemies marked for removal.");
+                // The WaveManager's update loop should now detect the wave end naturally
+                // as enemies are removed and reportEnemyDestroyed is called.
+            } else {
+                console.log("Debug: No active wave to clear.");
+            }
+        });
+
+        // --- Clear Plasma Button Setup ---
+        this.clearPlasmaButtonElement = document.getElementById('clear-plasma-button');
+        if (this.clearPlasmaButtonElement) {
+            this.clearPlasmaButtonElement.style.display = 'block'; // Show the button
+            this.clearPlasmaButtonElement.addEventListener('click', () => {
+                this.clearAllPlasma();
+            });
+        } else {
+            console.error("Clear Plasma button element not found in HTML!");
+        }
+ 
+        // --- Boss Pointer Arrow Setup REMOVED ---
+        // --- Boss Health Bar UI Setup ---
+        this.bossHealthBarContainerElement = document.getElementById('boss-health-bar-container');
+        this.bossHealthBarFillElement = document.getElementById('boss-health-bar-fill');
+        this.bossHealthBarMarkerElement = document.getElementById('boss-health-bar-marker'); // Get marker reference
+        if (!this.bossHealthBarContainerElement || !this.bossHealthBarFillElement || !this.bossHealthBarMarkerElement) { // Check marker too
+            console.error("Boss health bar elements not found in HTML!");
+        }
+        // --- End Boss Health Bar UI Setup ---
+
+        // --- Custom Projectile Graphics Setup ---
+        this.customProjectileGraphics = this.add.graphics();
+        this.customProjectileGraphics.setDepth(1.7); // Depth similar to other projectiles or slightly above
+        // --- End Custom Projectile Graphics Setup ---
     }
 
     update(time, delta) {
@@ -244,6 +313,17 @@ export default class GameScreen extends Phaser.Scene {
 
         // Update InputHandler first to capture current state
         this.inputHandler.update();
+ 
+        // --- Debug: Skip to Wave 15 ---
+        if (this.inputHandler.wasPressed('KeyO')) { // Check if 'O' key was just pressed
+            if (this.waveManager) {
+                console.log("Debug: Jumping to Wave 15...");
+                this.waveManager.jumpToWave(15);
+            } else {
+                console.warn("Debug: Cannot jump wave, WaveManager not found.");
+            }
+        }
+        // --- End Debug ---
 
         // Update Player logic (handles input, physics, state)
         // Pass delta in seconds, and the scene as the 'world' context for interactions
@@ -301,16 +381,18 @@ export default class GameScreen extends Phaser.Scene {
 
                 // Ensure visual exists for active enemy
                 if (!this.enemyVisuals.has(enemy.id)) {
-                    // Determine color based on enemy type
-                    const enemyColor = (enemy.type === 'ranged_enemy') ? 0xffa500 : 0xff0000; // Orange for ranged, Red for others
+                    console.log(`[GameScreen] Attempting to create visual for new enemy ID: ${enemy.id}, Type: ${enemy.constructor.name}`); // <-- ADDED LOG
+                    // Use fillColor if available, otherwise fallback to color
+                    const fillColor = enemy.fillColor !== undefined ? enemy.fillColor : enemy.color;
                     const enemyVisual = this.add.rectangle(
                         enemy.x, enemy.y,
                         enemy.collisionBounds.width, // Use enemy's bounds
                         enemy.collisionBounds.height,
-                        enemyColor // Use determined color
+                        fillColor // Use the determined fill color
                     );
                     enemyVisual.setDepth(0.95); // Slightly above shadow, below player
                     this.enemyVisuals.set(enemy.id, enemyVisual);
+                    console.log(`[GameScreen] Visual created and added for enemy ID: ${enemy.id}`); // <-- ADDED LOG
                 }
 
                 // Sync enemy visual position
@@ -354,14 +436,41 @@ export default class GameScreen extends Phaser.Scene {
 
         // --- Update Projectiles ---
         this.projectiles.forEach(projectile => {
-            projectile.update(dtSeconds);
+            // Pass worldContext to projectile update if needed (e.g., for dynamite explosion checks)
+            projectile.update(dtSeconds, worldContext);
 
-            // Sync visual position
+            // Sync visual position (visuals are now created/managed by addProjectile)
             const visual = this.projectileVisuals.get(projectile.id);
-            if (visual) {
+            // Only update position/rotation if the visual exists AND is not the dummy graphics object used for Dynamite
+            if (visual && visual.type !== 'Graphics' && projectile.state !== 'dead') {
                 visual.setPosition(projectile.x, projectile.y);
+                // Update rotation for projectiles that need it (like dynamite - though its visual is dummy)
+                // Standard projectiles and railgun visuals get rotation updated here.
+                 if (typeof projectile.angle === 'number' && !(projectile instanceof DynamiteProjectile)) { // Don't rotate dummy visual
+                    visual.setRotation(projectile.angle);
+                 } else if (projectile instanceof Projectile && !(projectile instanceof DynamiteProjectile)) {
+                     // Set rotation based on velocity/direction for non-dynamite projectiles if angle isn't directly set
+                     const angle = Math.atan2(projectile.velocityY || projectile.direction.y, projectile.velocityX || projectile.direction.x);
+                     visual.setRotation(angle);
+                 }
+            }
+            // Note: DynamiteProjectile handles its own drawing via its draw method.
+            // We will call it explicitly below.
+        });
+
+        // --- Draw Custom Projectiles ---
+        // Clear the dedicated graphics object each frame
+        if (this.customProjectileGraphics) {
+            this.customProjectileGraphics.clear();
+        }
+        // Iterate projectiles and call custom draw methods
+        this.projectiles.forEach(projectile => {
+            if (projectile.state !== 'dead' && typeof projectile.draw === 'function') {
+                // Pass the dedicated graphics object and camera to the draw method
+                projectile.draw(this.customProjectileGraphics, this.cameras.main);
             }
         });
+        // --- End Draw Custom Projectiles ---
         // --- End Update Projectiles ---
 
         // --- Gameplay Collision Detection & Handling (Attacks, Damage, Pickups) ---
@@ -544,6 +653,10 @@ export default class GameScreen extends Phaser.Scene {
                 console.log(`Enemy ${enemy.id} died, spawning plasma.`);
                 const plasmaDrop = new Plasma(enemy.x, enemy.y);
                 this.items.push(plasmaDrop);
+                // Report enemy death to WaveManager
+                if (this.waveManager) {
+                    this.waveManager.reportEnemyDestroyed();
+                }
                 // --- End Spawn Plasma ---
 
                 // Handle enemy visual removal
@@ -641,6 +754,16 @@ if (this.tileCoordsElement && this.player) {
         // --- Update Powerup Counters UI ---
         this.updatePowerupCountersUI();
 
+        // --- Update Wave Manager ---
+        if (this.waveManager) {
+            this.waveManager.update(time, delta);
+        }
+ 
+        // --- Update Boss Pointer Arrow REMOVED ---
+        // --- Update Boss Health Bar UI ---
+        this.updateBossHealthBarUI();
+        this.updateEarthquakeZones(dtSeconds); // Update earthquake zones
+        // --- End Update Boss Health Bar UI ---
     } // End of update method
 
     // --- Collision Resolution Method ---
@@ -740,6 +863,9 @@ handlePlayerDeath() {
     if (this.miniMap) this.miniMap.hide(); // Use MiniMap's hide method
     if (this.tileCoordsElement) this.tileCoordsElement.style.display = 'none'; // Hide coords
     if (this.powerupCountersContainerElement) this.powerupCountersContainerElement.style.display = 'none'; // Hide counters
+    if (this.waveCounterElement) this.waveCounterElement.style.display = 'none'; // Hide wave counter
+    if (this.clearPlasmaButtonElement) this.clearPlasmaButtonElement.style.display = 'none'; // Hide clear plasma button
+    if (this.bossHealthBarContainerElement) this.bossHealthBarContainerElement.style.display = 'none'; // Hide boss health bar
 
     // Create Respawn Button
     this.respawnButton = this.add.text(this.cameras.main.centerX, this.cameras.main.centerY + 50, 'Respawn', {
@@ -858,6 +984,15 @@ respawnPlayer() { // No longer needs death location
     if (this.miniMap) this.miniMap.show(); // Use MiniMap's show method
     if (this.tileCoordsElement) this.tileCoordsElement.style.display = 'block'; // Show coords
     if (this.powerupCountersContainerElement) this.powerupCountersContainerElement.style.display = 'flex'; // Show counters
+    if (this.waveCounterElement) {
+         this.waveCounterElement.style.display = 'block'; // Show wave counter
+         // Update wave counter text on respawn (using current wave from manager)
+         if (this.waveManager) {
+            this.updateWaveUI(this.waveManager.getCurrentWave());
+         }
+    }
+    if (this.clearPlasmaButtonElement) this.clearPlasmaButtonElement.style.display = 'block'; // Show clear plasma button
+    // Boss health bar remains hidden on respawn unless a boss is active
 
     // Update UI immediately
     // Update HTML Plasma Counter
@@ -868,7 +1003,8 @@ respawnPlayer() { // No longer needs death location
          this.playerHpText.setText(`HP: ${this.player.health}/${this.player.maxHealth}`);
          this.playerHpText.setFill('#00FF00'); // Reset color to green on respawn
     }
-
+    if (this.clearPlasmaButtonElement) this.clearPlasmaButtonElement.style.display = 'block'; // Show clear plasma button
+    // Boss health bar remains hidden on respawn unless a boss is active
     // Optional: Add brief invulnerability or visual effect on respawn
     if (this.playerVisual) {
         this.playerVisual.setAlpha(0.5); // Make slightly transparent
@@ -903,7 +1039,11 @@ updateEnemyVisuals() {
         const visual = this.enemyVisuals.get(enemy.id);
         if (!visual) return;
 
-        const defaultColor = (enemy.type === 'ranged_enemy') ? 0xffa500 : 0xff0000;
+        // Prioritize enemy.color, then specific types, then fallback
+        let baseColor = enemy.color ? Phaser.Display.Color.ValueToColor(enemy.color).color : null; // Convert hex string/number if needed
+        if (baseColor === null) { // If enemy.color wasn't set or invalid
+            baseColor = (enemy.type === 'ranged_enemy') ? 0xffa500 : 0xff0000; // Fallback: orange for ranged, red for others
+        }
 
         // Handle flashing (overrides tint and stun visual)
         if (enemy.isFlashing) {
@@ -918,7 +1058,7 @@ updateEnemyVisuals() {
             }
         } else {
             // Not flashing: Reset fill color and scale
-            visual.setFillStyle(defaultColor);
+            visual.setFillStyle(baseColor); // Use the determined baseColor
             visual.setScale(1.0);
             visual.setAlpha(1);
 
@@ -1088,61 +1228,85 @@ createOrUpdateStunEffect(enemy) {
         // Screen shake is now handled specifically on player hit
     }
 
-    // --- Projectile Creation ---
+    // --- Generic Projectile Adding ---
+    addProjectile(projectileInstance) {
+        if (!projectileInstance || !projectileInstance.id) {
+             console.error("Attempted to add invalid projectile instance:", projectileInstance);
+             return null;
+        }
+
+        this.projectiles.push(projectileInstance);
+
+        // Create visual based on projectile type
+        let visual = null; // Initialize visual as null
+
+        if (projectileInstance instanceof DynamiteProjectile) {
+            // Dynamite uses its own draw method. We don't create a Phaser visual to render.
+            // However, we might need a placeholder in the map if cleanup logic relies on it.
+            // Let's use a simple flag or skip adding to the map for dynamite.
+            // For simplicity, we won't add a visual to the map for Dynamite.
+             console.log(`Dynamite projectile ${projectileInstance.id} added (no separate visual created).`);
+        } else if (projectileInstance instanceof RailgunProjectile) {
+            visual = this.add.image(projectileInstance.x, projectileInstance.y, 'plasma_bullet');
+            visual.rotation = Math.atan2(projectileInstance.velocityY, projectileInstance.velocityX); // Use velocity for initial angle
+            visual.texture.setFilter(Phaser.Textures.FilterMode.NEAREST);
+            const chargeRatio = projectileInstance.chargeRatio || 0;
+            const scaleX = (1.0 + chargeRatio * 2.0) * 2.0;
+            const scaleY = (0.5 + chargeRatio * 0.8) * 2.0;
+            visual.setScale(scaleX, scaleY);
+            const blueIntensity = 155 + Math.floor(100 * chargeRatio);
+            const greenIntensity = 100 + Math.floor(155 * chargeRatio);
+            const tintColor = Phaser.Display.Color.GetColor(255, greenIntensity, blueIntensity);
+            visual.setTint(tintColor);
+            const glowIntensity = 0.5 + chargeRatio * 0.5;
+            visual.postFX.addGlow(tintColor, glowIntensity, 0, false, 0.1, 5 + chargeRatio * 5);
+            visual.setDepth(1.6);
+        } else if (projectileInstance instanceof Projectile) { // Standard projectile
+            visual = this.add.image(projectileInstance.x, projectileInstance.y, 'bullet');
+            visual.rotation = Math.atan2(projectileInstance.direction.y, projectileInstance.direction.x);
+            visual.texture.setFilter(Phaser.Textures.FilterMode.NEAREST);
+            visual.setDepth(1.5);
+        } else {
+            console.warn(`Unknown projectile type added: ${projectileInstance.constructor.name}`);
+            // Create a default visual (e.g., small circle)
+            visual = this.add.circle(projectileInstance.x, projectileInstance.y, 5, 0xff00ff); // Magenta circle for unknown
+            visual.setDepth(1.5);
+        }
+
+        // Only add to map if a visual was actually created
+        if (visual) {
+             this.projectileVisuals.set(projectileInstance.id, visual);
+             console.log(`Added projectile ${projectileInstance.id} (${projectileInstance.constructor.name}) with visual.`);
+        } else if (!(projectileInstance instanceof DynamiteProjectile)) {
+             console.warn(`No visual created for projectile ${projectileInstance.id} (${projectileInstance.constructor.name})`);
+        }
+
+
+        return projectileInstance;
+    }
+
+
+    // --- Specific Projectile Creation (Refactored) ---
     createProjectile(x, y, direction, speed, damage, ownerId, type = 'projectile') {
-        // Create the logical projectile instance
-        // Pass options object correctly
-        const projectile = new Projectile(x, y, direction, speed, damage, ownerId, type, {}); // Pass type in constructor, empty options obj
-        this.projectiles.push(projectile);
+        // Ensure direction is normalized if needed by Projectile constructor
+        const len = Math.sqrt(direction.x * direction.x + direction.y * direction.y);
+        const normalizedDir = (len > 0) ? { x: direction.x / len, y: direction.y / len } : { x: 1, y: 0 }; // Default to right if length is 0
 
-        // Create the visual representation using the preloaded bullet image
-        const visual = this.add.image(x, y, 'bullet');
-        visual.rotation = Math.atan2(direction.y, direction.x);
-        visual.texture.setFilter(Phaser.Textures.FilterMode.NEAREST);
-        visual.setDepth(1.5);
-        this.projectileVisuals.set(projectile.id, visual);
-
-        console.log(`Created projectile ${projectile.id} of type ${type} at (${x.toFixed(0)}, ${y.toFixed(0)}) owned by ${ownerId}`);
-        return projectile;
+        const projectile = new Projectile(x, y, normalizedDir, speed, damage, ownerId, type, {});
+        return this.addProjectile(projectile); // Use the generic adder
     }
 
-    // --- NEW: Railgun Projectile Creation ---
     createRailgunProjectile(x, y, directionX, directionY, damage, speed, chargeRatio) {
-        const direction = { x: directionX, y: directionY }; // Ensure direction is an object
+        const direction = { x: directionX, y: directionY };
+        // Normalize direction if needed
+        const len = Math.sqrt(direction.x * direction.x + direction.y * direction.y);
+        const normalizedDir = (len > 0) ? { x: direction.x / len, y: direction.y / len } : { x: 1, y: 0 };
 
-        // Create the logical railgun projectile instance
-        const projectile = new RailgunProjectile(x, y, direction, speed, damage, this.player.id, chargeRatio, {}); // Pass empty options obj
-        this.projectiles.push(projectile);
-
-        // Create the visual representation (using bullet for now, maybe scaled/tinted)
-        // TODO: Use a dedicated railgun beam asset if available
-        const visual = this.add.image(x, y, 'plasma_bullet'); // Use the new plasma bullet image
-        visual.rotation = Math.atan2(direction.y, direction.x);
-        visual.texture.setFilter(Phaser.Textures.FilterMode.NEAREST);
-
-        // Scale visual based on chargeRatio (e.g., thicker beam for full charge)
-        // Double the base scale and the charge-based scaling
-        const scaleX = (1.0 + chargeRatio * 2.0) * 2.0; // Length scales more with charge, then doubled
-        const scaleY = (0.5 + chargeRatio * 0.8) * 2.0; // Width scales less, then doubled
-        visual.setScale(scaleX, scaleY);
-
-        // Tint based on charge (e.g., brighter/whiter for full charge)
-        const blueIntensity = 155 + Math.floor(100 * chargeRatio); // 155 to 255
-        const greenIntensity = 100 + Math.floor(155 * chargeRatio); // 100 to 255
-        const tintColor = Phaser.Display.Color.GetColor(255, greenIntensity, blueIntensity); // White-cyan-ish
-        visual.setTint(tintColor);
-
-        // Add a subtle glow, stronger with charge
-        const glowIntensity = 0.5 + chargeRatio * 0.5; // 0.5 to 1.0
-        visual.postFX.addGlow(tintColor, glowIntensity, 0, false, 0.1, 5 + chargeRatio * 5);
-
-
-        visual.setDepth(1.6); // Slightly above normal projectiles?
-        this.projectileVisuals.set(projectile.id, visual);
-
-        console.log(`Created RAILGUN projectile ${projectile.id} at (${x.toFixed(0)}, ${y.toFixed(0)}) with charge ${chargeRatio.toFixed(2)}`);
-        return projectile;
+        const projectile = new RailgunProjectile(x, y, normalizedDir, speed, damage, this.player.id, chargeRatio, {});
+        return this.addProjectile(projectile); // Use the generic adder
     }
+    // Note: The EngineerEnemy's throwDynamite method calls scene.addProjectile directly
+    // with the already created DynamiteProjectile instance.
 
     // 2. Make the Dash Trail White
     createDashTrailEffect(x, y) {
@@ -1505,6 +1669,62 @@ createOrUpdateStunEffect(enemy) {
     }
     // --- End Bleed Particle Effect ---
 
+    createSplitEffect(x, y, color) {
+        console.log(`Creating split effect at (${x.toFixed(0)}, ${y.toFixed(0)})`);
+        const particleCount = 20;
+        const duration = 500; // milliseconds
+        const maxRadius = 60;
+
+        // Create particles that burst outward
+        for (let i = 0; i < particleCount; i++) {
+            // Create a particle with the enemy's color
+            const size = Phaser.Math.Between(3, 8);
+            const particle = this.add.circle(x, y, size, color, 0.8);
+            particle.setDepth(1.8);
+
+            // Random angle for the particle's trajectory
+            const angle = Math.random() * Math.PI * 2;
+            const speed = 50 + Math.random() * 100;
+            const distance = Math.random() * maxRadius;
+
+            const targetX = x + Math.cos(angle) * distance;
+            const targetY = y + Math.sin(angle) * distance;
+
+            // Animate particle: move outward, rotate, fade
+            this.tweens.add({
+                targets: particle,
+                x: targetX,
+                y: targetY,
+                angle: Phaser.Math.Between(-180, 180),
+                scale: { from: 1, to: 0.2 },
+                alpha: { from: 0.8, to: 0 },
+                duration: duration * Phaser.Math.FloatBetween(0.7, 1.0),
+                ease: 'Power2',
+                onComplete: () => {
+                    particle.destroy();
+                }
+            });
+        }
+
+        // Create a flash at the split location
+        const flash = this.add.circle(x, y, 30, color, 0.6);
+        flash.setDepth(1.7);
+
+        this.tweens.add({
+            targets: flash,
+            scale: 2,
+            alpha: 0,
+            duration: 300,
+            ease: 'Power2',
+            onComplete: () => {
+                flash.destroy();
+            }
+        });
+
+        // Add a quick screen shake
+        this.cameras.main.shake(100, 0.008);
+    }
+
     // --- Powerup Selection Flow ---
 
     // Define available powerups here for GameScreen to access
@@ -1617,6 +1837,14 @@ createOrUpdateStunEffect(enemy) {
             }
         }
     }
+
+    // --- Wave UI Update ---
+    updateWaveUI(waveNumber) {
+        if (this.waveCounterElement) {
+            this.waveCounterElement.innerText = `Wave: ${waveNumber}`;
+        }
+    }
+    // --- End Wave UI Update ---
     // --- End Powerup Selection Flow ---
 // --- Resize Handler ---
 handleResize(gameSize) {
@@ -1672,22 +1900,72 @@ shutdown() {
         if (this.powerupCountersContainerElement) {
             this.powerupCountersContainerElement.style.display = 'none';
         }
+        // Hide wave counter on shutdown
+        if (this.waveCounterElement) {
+            this.waveCounterElement.style.display = 'none';
+        }
+        // Hide clear plasma button on shutdown
+        if (this.clearPlasmaButtonElement) {
+            this.clearPlasmaButtonElement.style.display = 'none';
+            // Remove listener to prevent memory leaks if scene restarts
+            // Note: A more robust solution might involve storing the listener function reference
+            // this.clearPlasmaButtonElement.removeEventListener('click', ...);
+        }
+        // Hide boss health bar on shutdown
+        if (this.bossHealthBarContainerElement) {
+            this.bossHealthBarContainerElement.style.display = 'none';
+        }
+
+        // Destroy WaveManager
+        if (this.waveManager) {
+            // Add a destroy method to WaveManager if needed for cleanup (e.g., timers)
+            // this.waveManager.destroy();
+            this.waveManager = null;
+        }
 
         // Release references
         this.player = null;
         this.playerVisual = null;
         this.playerShadow = null;
         if (this.playerShadow) this.playerShadow.destroy();
-        this.debugGraphics = null;
-        if (this.debugGraphics) this.debugGraphics.destroy();
+        this.debugGraphics = null; // Already destroyed if exists
+        if (this.customProjectileGraphics) { // Destroy custom graphics object
+             this.customProjectileGraphics.destroy();
+             this.customProjectileGraphics = null;
+        }
         // Destroy any remaining enemy visuals
         this.enemyVisuals.forEach(visual => visual.destroy());
         this.enemyVisuals.clear();
         this.enemies = []; // Clear the enemy array
         // Destroy any remaining projectile visuals
-        this.projectileVisuals.forEach(visual => visual.destroy());
+        this.projectileVisuals.forEach(visual => {
+            // Check if visual exists and has a destroy method before calling it
+            if (visual && typeof visual.destroy === 'function') {
+                 visual.destroy();
+            }
+        });
         this.projectileVisuals.clear();
         this.projectiles = []; // Clear the projectile array
+
+        // Clear earthquake zones and their visuals/tweens
+        this.earthquakeZones.forEach(zone => {
+            if (zone.visual) {
+                 // Attempt to stop the tween associated with the visual
+                 const zoneTween = zone.visual.getData('tweens') ? zone.visual.getData('tweens')[0] : null;
+                 if (zoneTween && typeof zoneTween.stop === 'function') {
+                     try {
+                         zoneTween.stop();
+                     } catch (e) {
+                         console.warn("Error stopping earthquake zone tween:", e);
+                     }
+                 }
+                 // Destroy the visual itself
+                 if (typeof zone.visual.destroy === 'function') {
+                    zone.visual.destroy();
+                 }
+            }
+        });
+        this.earthquakeZones = [];
 
     }
 
@@ -1710,5 +1988,270 @@ shutdown() {
         }
     }
     // --- End Continuous Screen Shake Methods ---
+
+    // --- Update Boss Health Bar UI ---
+    updateBossHealthBarUI() {
+        if (!this.bossHealthBarContainerElement || !this.bossHealthBarFillElement) {
+            return; // Elements not found
+        }
+
+        // Find the active EngineerEnemy boss
+        let boss = null;
+        for (const enemy of this.enemies) {
+            if (enemy instanceof EngineerEnemy && enemy.state !== 'dead') {
+                boss = enemy;
+                break; // Found the boss
+            }
+        }
+
+        if (boss) {
+            // Boss is active, show the bar and marker, update fill
+            this.bossHealthBarContainerElement.style.display = 'block';
+            this.bossHealthBarMarkerElement.style.display = 'block'; // Show marker
+            const hpPercent = Math.max(0, boss.health / boss.maxHealth);
+            const widthPercentage = hpPercent * 100;
+            this.bossHealthBarFillElement.style.width = `${widthPercentage}%`;
+            // Keep the gradient defined in CSS, no need to set background color here
+            // this.bossHealthBarFillElement.style.backgroundColor = 'red';
+        } else {
+            // No active boss, hide the bar and marker
+            this.bossHealthBarContainerElement.style.display = 'none';
+            this.bossHealthBarMarkerElement.style.display = 'none'; // Hide marker
+        }
+    }
+    // --- End Update Boss Health Bar UI ---
+
+    // --- Clear Plasma Method ---
+    clearAllPlasma() {
+        console.log("Clearing all plasma items...");
+        let clearedCount = 0;
+        this.items.forEach(item => {
+            if (item instanceof Plasma) {
+                item.health = 0; // Mark for removal by setting health to 0
+                clearedCount++;
+                // Optional: Add a small visual effect where the plasma was
+                // this.createImpactEffect(item.x, item.y, 0.5); // Example small effect
+            }
+        });
+        console.log(`Marked ${clearedCount} plasma items for removal.`);
+        // The main update loop will handle the actual removal of visuals and from the array
+    }
+    // --- End Clear Plasma Method ---
+ 
+    // --- Boss Pointer Update Logic REMOVED ---
+ 
+    // --- Tunnel Explosion Effect (Mars Dirt) ---
+    createTunnelExplosion(x, y) {
+        const particleCount = 25; // More particles for explosion
+        const duration = 500; // Longer duration
+        const maxRadius = 70; // Wider spread
+
+        for (let i = 0; i < particleCount; i++) {
+            // Create a reddish-brown/grey circle particle ("Mars dirt")
+            const baseShade = Phaser.Math.Between(90, 150); // Base grey/brown
+            const redTint = Phaser.Math.Between(20, 50); // Add some red
+            const color = Phaser.Display.Color.GetColor(baseShade + redTint, baseShade * 0.9, baseShade * 0.8);
+            const particle = this.add.circle(x, y, Phaser.Math.Between(4, 8), color, 0.7); // Slightly larger, more opaque
+            particle.setDepth(1.8); // Above trail particles
+
+            // Random angle and distance for spread
+            const angle = Math.random() * Math.PI * 2;
+            const radius = Math.random() * maxRadius;
+            const targetX = x + Math.cos(angle) * radius;
+            const targetY = y + Math.sin(angle) * radius;
+
+            // Animate particle: move out, shrink, fade
+            this.tweens.add({
+                targets: particle,
+                x: targetX,
+                y: targetY,
+                scale: 0.2, // Shrink less drastically than trail
+                alpha: 0,
+                duration: duration * Phaser.Math.FloatBetween(0.7, 1.0), // Vary duration
+                ease: 'Quad.easeOut',
+                onComplete: () => {
+                    if (particle.active) particle.destroy();
+                }
+            });
+        }
+        // Optional: Add a small camera shake for impact
+        // this.cameras.main.shake(80, 0.005);
+    }
+    // --- End Tunnel Explosion Effect ---
+
+    // --- Tunnel Trail Particle Effect ---
+    createTunnelTrailParticle(x, y) {
+        const duration = 300; // Slightly longer duration for trail particles
+        const size = Phaser.Math.Between(4, 7); // Slightly larger size
+
+        // Create a single brown/grey circle particle
+        const greyShade = Phaser.Math.Between(80, 140); // Dirt colors (slightly lighter range)
+        const color = Phaser.Display.Color.GetColor(greyShade, greyShade * 0.9, greyShade * 0.8); // Brownish grey
+        const particle = this.add.circle(x, y, size, color, 0.7); // More opaque
+        particle.setDepth(1.6); // Below burst particles, above ground
+
+        // Animate particle: fade out, maybe slight shrink
+        this.tweens.add({
+            targets: particle,
+            alpha: 0,
+            scale: 0.6, // Shrink slightly less
+            duration: duration,
+            ease: 'Linear',
+            onComplete: () => {
+                if (particle.active) particle.destroy();
+            }
+        });
+    }
+    // --- End Tunnel Trail Particle Effect ---
+ 
+    // --- Drone Explosion Effect ---
+    createExplosionEffect(x, y, radius) {
+        console.log(`Creating explosion effect at (${x.toFixed(0)}, ${y.toFixed(0)}) with radius ${radius}`);
+        const particleCount = 30; // More particles for explosion
+        const duration = 600; // milliseconds
+        const maxParticleSpread = radius * 1.5; // Particles spread slightly beyond visual radius
+ 
+        // Create particles (yellow/orange/white mix)
+        for (let i = 0; i < particleCount; i++) {
+            const particleColorValue = Phaser.Math.RND.pick([0xffffff, 0xffff00, 0xffa500]); // White, Yellow, Orange
+            const particle = this.add.circle(x, y, Phaser.Math.Between(3, 7), particleColorValue, 0.9);
+            particle.setDepth(1.9); // Above most things
+ 
+            // Random angle and distance for spread
+            const angle = Math.random() * Math.PI * 2;
+            const spreadDistance = Math.random() * maxParticleSpread;
+            const targetX = x + Math.cos(angle) * spreadDistance;
+            const targetY = y + Math.sin(angle) * spreadDistance;
+ 
+            // Animate particle: move out, shrink, fade
+            this.tweens.add({
+                targets: particle,
+                x: targetX,
+                y: targetY,
+                scale: 0.1, // Shrink to almost nothing
+                alpha: 0,
+                duration: duration * Phaser.Math.FloatBetween(0.6, 1.0), // Vary duration
+                ease: 'Quad.easeOut',
+                onComplete: () => {
+                    if (particle.active) particle.destroy();
+                }
+            });
+        }
+ 
+        // Create a central flash (bright yellow/white)
+        const flash = this.add.circle(x, y, radius * 0.8, 0xffffaa, 0.8);
+        flash.setDepth(1.8); // Slightly below particles
+ 
+        this.tweens.add({
+            targets: flash,
+            scale: 1.5, // Expand flash slightly
+            alpha: 0,
+            duration: 200, // Quick flash
+            ease: 'Expo.easeOut',
+            onComplete: () => {
+                if (flash.active) flash.destroy();
+            }
+        });
+ 
+        // Add screen shake
+        this.cameras.main.shake(150, 0.012); // Slightly stronger shake for explosion
+    }
+    // --- End Drone Explosion Effect ---
+
+    // --- Earthquake Zone Effect ---
+    createShockwaveEffect(x, y) { // Renaming to createEarthquakeZone might be better later
+        const zoneRadius = 120; // Radius of the damaging zone
+        const zoneDuration = 80.0; // How long the zone lasts (seconds) - Increased to 80s
+        const damageAmount = 5;
+        const damageInterval = 2.0; // Damage every 2 seconds
+        const visualColor = 0x8B4513; // SaddleBrown for dirt effect
+        const visualAlpha = 0.3;
+
+        // Create the persistent visual for the zone (e.g., a semi-transparent circle)
+        const zoneVisual = this.add.graphics();
+        zoneVisual.fillStyle(visualColor, visualAlpha);
+        zoneVisual.fillCircle(x, y, zoneRadius);
+        zoneVisual.setDepth(0.5); // Draw below entities
+
+        // Add pulsing effect to the visual
+        this.tweens.add({
+            targets: zoneVisual,
+            alpha: visualAlpha * 0.5, // Pulse between 0.3 and 0.15 alpha
+            duration: 750,
+            yoyo: true,
+            repeat: -1, // Repeat indefinitely until destroyed
+            ease: 'Sine.easeInOut'
+        });
+
+
+        // Create the zone data object
+        const earthquakeZone = {
+            x: x,
+            y: y,
+            radius: zoneRadius,
+            radiusSq: zoneRadius * zoneRadius, // Pre-calculate for efficiency
+            durationTimer: zoneDuration,
+            damageTickTimer: damageInterval, // Start ready to deal damage
+            visual: zoneVisual,
+            damageAmount: damageAmount,
+            damageInterval: damageInterval,
+            tween: zoneVisual.getData('tweens') ? zoneVisual.getData('tweens')[0] : null // Store tween reference if needed
+        };
+
+        // Add to the list of active zones
+        this.earthquakeZones.push(earthquakeZone);
+        console.log(`Created earthquake zone at (${x.toFixed(0)}, ${y.toFixed(0)})`);
+    }
+    // --- End Earthquake Zone Effect ---
+
+    // --- Update Earthquake Zones ---
+    updateEarthquakeZones(deltaTime) {
+        if (!this.player || this.player.state === 'dead') return; // Don't process if player is dead
+
+        // Iterate backwards for safe removal
+        for (let i = this.earthquakeZones.length - 1; i >= 0; i--) {
+            const zone = this.earthquakeZones[i];
+
+            // Update duration timer
+            zone.durationTimer -= deltaTime;
+
+            // Check if zone expired
+            if (zone.durationTimer <= 0) {
+                console.log(`Earthquake zone expired at (${zone.x.toFixed(0)}, ${zone.y.toFixed(0)})`);
+                if (zone.visual) {
+                     // Stop the tween before destroying
+                    const zoneTween = zone.visual.getData('tweens') ? zone.visual.getData('tweens')[0] : null;
+                    if (zoneTween) {
+                        zoneTween.stop();
+                    }
+                    zone.visual.destroy();
+                }
+                this.earthquakeZones.splice(i, 1); // Remove from array
+                continue; // Move to the next zone
+            }
+
+            // Update damage tick timer
+            zone.damageTickTimer -= deltaTime;
+
+            // Check if it's time to deal damage
+            if (zone.damageTickTimer <= 0) {
+                zone.damageTickTimer = zone.damageInterval; // Reset timer
+
+                // Check distance to player
+                const dx = this.player.x - zone.x;
+                const dy = this.player.y - zone.y;
+                const distanceSq = dx * dx + dy * dy;
+
+                // Apply damage if player is within radius
+                if (distanceSq <= zone.radiusSq) {
+                    console.log(`Player hit by earthquake zone at (${zone.x.toFixed(0)}, ${zone.y.toFixed(0)}). Damage: ${zone.damageAmount}`);
+                    this.player.takeDamage(zone.damageAmount);
+                    // Optional: Add a small screen shake when player takes damage
+                    this.cameras.main.shake(50, 0.005);
+                }
+            }
+        }
+    }
+    // --- End Update Earthquake Zones ---
 
 } // End of GameScreen class

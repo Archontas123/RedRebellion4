@@ -123,6 +123,27 @@
             /* Removed background-color, border-radius, box-shadow */
         }
 
+        #clear-plasma-button {
+            position: absolute;
+            top: 75px; /* Position below plasma counter */
+            left: 10px;
+            padding: 5px 10px;
+            background-color: #ff4444; /* Reddish color */
+            color: white;
+            border: 1px solid #ff8888;
+            border-radius: 4px;
+            font-family: 'Arial', sans-serif;
+            font-size: 14px;
+            cursor: pointer;
+            pointer-events: auto; /* Make button clickable */
+            display: none; /* Hide by default */
+            z-index: 11; /* Above UI layer */
+            box-shadow: 0 0 5px #ff4444;
+        }
+        #clear-plasma-button:hover {
+            background-color: #dd2222;
+        }
+
         #tile-coords-display {
             position: absolute;
             top: 210px; /* mini-map top (20px) + height (180px) + 10px spacing */
@@ -204,6 +225,55 @@
             }
         }
 
+        #wave-counter-display {
+            position: absolute;
+            top: 15px; /* Position near the top */
+            left: 50%; /* Center horizontally */
+            transform: translateX(-50%); /* Adjust for centering */
+            color: #FFD700; /* Gold color */
+            font-size: 28px;
+            font-weight: bold;
+            font-family: 'Arial', sans-serif;
+            text-shadow: 2px 2px 4px #000000; /* Black shadow */
+            display: none; /* Hide by default */
+            pointer-events: none; /* Allow clicks through */
+            z-index: 10;
+        }
+
+        #boss-health-bar-container {
+            position: absolute;
+            top: 55px; /* wave-counter top (15px) + approx height (28px) + spacing (12px) */
+            left: 50%;
+            transform: translateX(-50%);
+            width: 300px; /* Wider bar for the boss */
+            height: 15px;
+            border: 2px solid #000000; /* Black border */
+            background-color: rgba(50, 50, 50, 0.7);
+            display: none; /* Hide by default */
+            box-sizing: border-box;
+            z-index: 10;
+        }
+
+        #boss-health-bar-fill {
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(to right, #ff0000, #ff6666); /* Red gradient */
+            transition: width 0.1s linear;
+        }
+
+        #boss-health-bar-marker {
+            position: absolute;
+            left: 50%;
+            top: 0;
+            bottom: 0;
+            width: 2px; /* Adjust width as needed */
+            background-color: rgba(255, 255, 255, 0.6); /* Semi-transparent white */
+            transform: translateX(-50%); /* Center the line precisely */
+            z-index: 1; /* Above fill, below potential text */
+            display: none; /* Hide by default, controlled by JS */
+            pointer-events: none; /* Prevent interaction */
+        }
+
     </style>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
     <script defer type="module" src="src/main.js"></script>
@@ -227,7 +297,13 @@
             <img id="plasma-icon" src="assets/plasma.png" alt="Plasma">
             <span id="plasma-count">0</span> <!-- Separate span for the count -->
         </div>
+        <button id="clear-plasma-button">Clear Plasma</button> <!-- Add the button -->
         <div id="tile-coords-display">Tile: 0, 0</div> <!-- Add coordinate display element -->
+        <div id="wave-counter-display">Wave: 0</div> <!-- Add Wave Counter element -->
+        <div id="boss-health-bar-container"> <!-- Boss Health Bar -->
+             <div id="boss-health-bar-fill"></div>
+             <div id="boss-health-bar-marker"></div> <!-- Added Marker -->
+        </div>
         <div id="powerup-counters">
             <!-- Speed Boost Counter -->
             <div class="powerup-counter" id="powerup-counter-speed_boost" style="display: none;">

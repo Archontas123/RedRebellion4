@@ -173,7 +173,9 @@ export default class MiniMap {
              const enemyId = enemy.id || enemy; // Assuming enemies have a unique ID
              if (enemy.state !== 'dead') { // Only update non-dead enemies
                  activeEnemies.set(enemyId, enemy);
-                 this.updateDot(enemy, 'map-enemy');
+                 // Assign different class based on enemy type
+                 const dotClass = 'map-enemy'; // Always use map-enemy now
+                 this.updateDot(enemy, dotClass);
              }
         });
 

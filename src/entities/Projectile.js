@@ -70,7 +70,7 @@ export class Projectile extends Entity {
             // console.log(`Projectile ${this.id} hit Player ${otherEntity.id}`);
             otherEntity.takeDamage(this.damage);
             this.destroy(); // Destroy projectile on hit
-        } else if (this.type === 'player_projectile' && (otherEntity.type === 'enemy' || otherEntity.type === 'ranged_enemy')) {
+        } else if (this.type === 'player_projectile' && (otherEntity.type === 'enemy' || otherEntity.type === 'ranged_enemy' || otherEntity.type === 'engineer' || otherEntity.type === 'drone_enemy')) { // Added 'drone_enemy'
             // Example if player could shoot projectiles
             // console.log(`Projectile ${this.id} hit Enemy ${otherEntity.id}`);
             otherEntity.takeDamage(this.damage);
