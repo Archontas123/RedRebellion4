@@ -78,6 +78,7 @@ class Entity {
     onDeath() {
         // Placeholder for death logic (e.g., remove entity, play animation)
         console.log(`Entity ${this.id} (${this.type}) died.`);
+        this.setState('dead'); // Ensure state is set on death
         // Often you'd set velocity to 0 or trigger a death animation here
         this.velocityX = 0;
         this.velocityY = 0;
@@ -366,20 +367,17 @@ draw(context) {
     // --- Draw Enhanced Shadow ---
     // Enhanced oval shadow below the entity
     context.fillStyle = 'rgba(0, 0, 0, 0.3)'; // Semi-transparent black
-    // Draw shadow using arc and scale for better compatibility
-    const shadowCenterX = bounds.x + bounds.width / 2;
-    const shadowBottomY = bounds.y + bounds.height;
-    const shadowRadiusX = bounds.width / 2 * 0.8;
-    const shadowRadiusY = bounds.height / 4;
-
-    // Use Phaser Graphics API for drawing the ellipse shadow
-    // Note: Phaser Graphics handles transformations internally, so save/restore/translate/scale are not needed here
-    // for simple shape drawing. We directly use fillEllipse with calculated center and radii.
-    if (shadowRadiusX > 0 && shadowRadiusY > 0) {
-        context.fillStyle = 'rgba(0, 0, 0, 0.3)'; // Set fill style property
-        // Phaser's fillEllipse takes center x, center y, width (diameter), height (diameter)
-        context.fillEllipse(shadowCenterX, shadowBottomY, shadowRadiusX * 2, shadowRadiusY * 2);
-    }
+    context.beginPath();
+    context.ellipse(
+        bounds.x + bounds.width / 2,    // Center X
+        bounds.y + bounds.height,       // Bottom Y
+        bounds.width / 2 * 0.8,         // Radius X (slightly smaller than width)
+        bounds.height / 4,              // Radius Y (flattened)
+        0,                              // Rotation
+        0,                              // Start Angle
+        Math.PI * 2                     // End Angle
+    );
+    context.fill();
     // --- End Draw Shadow ---
 
 

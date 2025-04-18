@@ -115,6 +115,10 @@ export class Player extends Entity {
         this.turretDestroyHoldTime = 1.0; // seconds to hold B (Reduced from 2.0)
         this.turretDestroyTimer = 0;
         this.nearbyTurret = null; // Track the turret being destroyed
+        this.turretPromptText = null; // Text object for the "[B] Disable" prompt
+
+        // Life system
+        this.lives = options.initialLives || 3; // Initialize lives
  }
 
     // onMouseMove, onMouseDown, onMouseUp removed - Handled by InputHandler via scene
@@ -391,10 +395,23 @@ if (this.isMoving && this.speedBoostStacks > 0 && this.scene && typeof this.scen
         // --- End Stop Screen Shake ---
 
 
+        // --- NEW: Check for Plasma ---
+        if (this.plasmaCount <= 0) {
+            console.log("Railgun fizzled - no plasma!");
+            // Optional: Play a specific "no ammo" sound
+            this.cancelRailgunCharge(); // Still need to cancel the charge state
+            return; // Exit the function, cannot fire
+        }
+
         if (chargeRatio >= minChargeToFire) {
+            // --- Consume Plasma ---
+            this.plasmaCount--;
+            console.log(`Plasma consumed. Remaining: ${this.plasmaCount}`);
+            // TODO: Update UI to reflect new plasma count
+
             // --- Calculate Damage Based on Charge ---
             const damage = this.railgunMinDamage + (this.railgunMaxDamage - this.railgunMinDamage) * chargeRatio;
-            console.log(`Firing railgun! (Charge: ${(chargeRatio * 100).toFixed(0)}%, Damage: ${damage.toFixed(0)})`);
+            console.log(`Firing railgun! (Charge: ${(chargeRatio * 100).toFixed(0)}%, Damage: ${damage.toFixed(0)}, Plasma Left: ${this.plasmaCount})`);
             // --- End Damage Calculation ---
 
             this.railgunCooldownTimer = this.railgunCooldown; // Set cooldown
@@ -858,94 +875,133 @@ updateCurrentTileCoords() {
             this.powerupManager = null;
         }
 
+        // Clean up prompt text
+        if (this.turretPromptText) {
+            this.turretPromptText.destroy();
+            this.turretPromptText = null;
+        }
+
         super.destroy();
     }
 
     // --- NEW: Turret Destruction Logic ---
     updateTurretDestruction(deltaTime) {
-        // Don't process if dashing, attacking, or dead
-        if (this.isDashing || this.isAttacking || this.state === 'dead') {
-            this.resetTurretDestruction();
-            return;
-        }
+        // --- Find Closest Turret ---
+        let closestTurret = null;
+        let minDistanceSq = this.turretDestroyRange * this.turretDestroyRange;
 
-        // Check if 'B' key is held down
-        if (this.inputHandler.isDown('KeyB')) {
-            // Find the closest turret within range
-            let closestTurret = null;
-            let minDistanceSq = this.turretDestroyRange * this.turretDestroyRange;
+        // Only search if not dashing, attacking, or dead
+        if (!this.isDashing && !this.isAttacking && this.state !== 'dead' && this.scene && this.scene.enemies) {
+            for (const enemy of this.scene.enemies) {
+                // Check if it's a TurretEnemy and alive
+                if (enemy.constructor.name === 'TurretEnemy' && enemy.state !== 'dead') {
+                    const dx = enemy.x - this.x;
+                    const dy = enemy.y - this.y;
+                    const distanceSq = dx * dx + dy * dy;
 
-            if (this.scene && this.scene.enemies) {
-                for (const enemy of this.scene.enemies) {
-                    // Check if it's a TurretEnemy and alive
-                    if (enemy.constructor.name === 'TurretEnemy' && enemy.state !== 'dead') {
-                        const dx = enemy.x - this.x;
-                        const dy = enemy.y - this.y;
-                        const distanceSq = dx * dx + dy * dy;
-
-                        if (distanceSq < minDistanceSq) {
-                            minDistanceSq = distanceSq;
-                            closestTurret = enemy;
-                        }
+                    if (distanceSq < minDistanceSq) {
+                        minDistanceSq = distanceSq;
+                        closestTurret = enemy;
                     }
                 }
             }
+        }
 
-            // If a turret is in range
-            if (closestTurret) {
-                // If it's a different turret than before, reset timer
+        // --- Handle Prompt Visibility ---
+        if (closestTurret) {
+            // Create or update prompt text
+            if (!this.turretPromptText && this.scene) {
+                this.turretPromptText = this.scene.add.text(
+                    this.x, this.y - 60, // Position above player
+                    '[B] Disable Turret',
+                    { fontSize: '16px', fill: '#ffffff', stroke: '#000000', strokeThickness: 3 }
+                );
+                this.turretPromptText.setOrigin(0.5, 1); // Center horizontally, bottom align
+                this.turretPromptText.setDepth(20); // Ensure it's visible
+            }
+            if (this.turretPromptText) {
+                this.turretPromptText.setPosition(this.x, this.y - 60); // Keep position updated
+                this.turretPromptText.setVisible(true);
+            }
+
+            // --- Handle 'B' Key Interaction ---
+            if (this.inputHandler.isDown('KeyB')) {
+                // If it's a different turret than before, reset timer and indicator
                 if (this.nearbyTurret !== closestTurret) {
-                    this.resetTurretDestruction();
+                    this.resetTurretDestruction(); // Resets timer and hides previous indicator
                     this.nearbyTurret = closestTurret;
                     console.log(`Player started interacting with Turret ${this.nearbyTurret.id}`);
-                    // --- NEW: Show visual indicator ---
+                    // Show visual indicator on the *new* target turret
                     if (typeof this.nearbyTurret.showDestructionIndicator === 'function') {
                         this.nearbyTurret.showDestructionIndicator();
                     }
                 }
 
-                // Increment timer
-                this.turretDestroyTimer += deltaTime;
-                // --- NEW: Update visual indicator ---
-                if (typeof this.nearbyTurret.updateDestructionIndicator === 'function') {
-                    const progress = Math.min(this.turretDestroyTimer / this.turretDestroyHoldTime, 1.0);
-                    this.nearbyTurret.updateDestructionIndicator(progress);
-                }
-
-                // Check if hold time is reached
-                if (this.turretDestroyTimer >= this.turretDestroyHoldTime) {
-                    console.log(`Player destroyed Turret ${this.nearbyTurret.id}`);
-                    if (typeof this.nearbyTurret.destroyTurret === 'function') {
-                        this.nearbyTurret.destroyTurret(); // Call the turret's destruction method
-                    } else {
-                        // Fallback: Call generic destroy or onDeath if specific method doesn't exist
-                        if (typeof this.nearbyTurret.destroy === 'function') {
-                            this.nearbyTurret.destroy();
-                        } else if (typeof this.nearbyTurret.onDeath === 'function') {
-                            this.nearbyTurret.onDeath();
-                        }
+                // Increment timer (only if interacting with a turret)
+                if (this.nearbyTurret) { // Ensure we have a target
+                    this.turretDestroyTimer += deltaTime;
+                    // Update visual indicator progress
+                    if (typeof this.nearbyTurret.updateDestructionIndicator === 'function') {
+                        const progress = Math.min(this.turretDestroyTimer / this.turretDestroyHoldTime, 1.0);
+                        this.nearbyTurret.updateDestructionIndicator(progress);
                     }
-                    this.resetTurretDestruction(); // Reset after destruction
-                    // TODO: Add visual effect for destruction completion
+
+                    // Check if hold time is reached
+                    if (this.turretDestroyTimer >= this.turretDestroyHoldTime) {
+                        console.log(`Player destroyed Turret ${this.nearbyTurret.id}`);
+                        if (typeof this.nearbyTurret.destroyTurret === 'function') {
+                            this.nearbyTurret.destroyTurret(); // Calls onDeath, hides indicator
+                        } else {
+                            // Fallback
+                            if (typeof this.nearbyTurret.destroy === 'function') this.nearbyTurret.destroy();
+                            else if (typeof this.nearbyTurret.onDeath === 'function') this.nearbyTurret.onDeath();
+                        }
+                        this.resetTurretDestruction(); // Reset timer, nearbyTurret, hides prompt
+                        // TODO: Add visual effect for destruction completion
+                    }
                 }
             } else {
-                // No turret in range, reset
+                // 'B' key not held, reset interaction state (timer, indicator) but keep prompt visible
                 this.resetTurretDestruction();
             }
+
         } else {
-            // 'B' key not held, reset
+            // No turret in range, hide prompt and reset interaction
+            if (this.turretPromptText) {
+                this.turretPromptText.setVisible(false);
+                // Optionally destroy it here, or just hide:
+                // this.turretPromptText.destroy();
+                // this.turretPromptText = null;
+            }
             this.resetTurretDestruction();
         }
-    }
+
+        // --- Cleanup check for edge cases (dash/attack/death) ---
+        if (this.isDashing || this.isAttacking || this.state === 'dead') {
+            if (this.turretPromptText) {
+                this.turretPromptText.setVisible(false); // Hide prompt immediately
+            }
+            this.resetTurretDestruction(); // Ensure interaction state is reset
+        }
+        }
+
 
     resetTurretDestruction() {
-        if (this.nearbyTurret) {
-            console.log(`Player stopped interacting with Turret ${this.nearbyTurret.id}`);
-            // --- NEW: Hide visual indicator ---
-            if (typeof this.nearbyTurret.hideDestructionIndicator === 'function') {
-                this.nearbyTurret.hideDestructionIndicator();
-            }
+        // Hide turret's own progress bar indicator
+        if (this.nearbyTurret && typeof this.nearbyTurret.hideDestructionIndicator === 'function') {
+            // console.log(`Hiding indicator for Turret ${this.nearbyTurret.id}`); // Debug
+            this.nearbyTurret.hideDestructionIndicator();
         }
+
+        // Hide the player's "[B] Disable" prompt text
+        if (this.turretPromptText) {
+            this.turretPromptText.setVisible(false);
+            // Optionally destroy it fully:
+            // this.turretPromptText.destroy();
+            // this.turretPromptText = null;
+        }
+
+        // Reset interaction state
         this.turretDestroyTimer = 0;
         this.nearbyTurret = null;
     }

@@ -8,10 +8,16 @@ import { Plasma } from '../entities/Plasma.js'; // Import Plasma
 import MiniMap from '../ui/MiniMap.js'; // Import MiniMap
 import { Projectile } from '../entities/Projectile.js'; // Import Projectile
 import { RailgunProjectile } from '../entities/RailgunProjectile.js'; // <-- NEW IMPORT
-import { DynamiteProjectile } from '../entities/DynamiteProjectile.js'; // Import DynamiteProjectile
 import Powerup from '../entities/Powerup.js'; // Import Powerup
 import WaveManager from '../entities/WaveManager.js'; // Import WaveManager
 import { EngineerEnemy } from '../entities/EngineerEnemy.js'; // Import EngineerEnemy
+
+// Define scoring constants
+const POINTS_PER_KILL = 10;
+const PENALTY_PER_DEATH = 50; // Can be negative if desired
+const POINTS_PER_SECOND = 1;
+const BOSS_KILL_MULTIPLIER = 2.5;
+
 export default class GameScreen extends Phaser.Scene {
     constructor() {
         super('GameScreen');
@@ -49,7 +55,32 @@ export default class GameScreen extends Phaser.Scene {
         this.bossHealthBarFillElement = null; // Reference to the boss health bar fill
         this.bossHealthBarMarkerElement = null; // Reference to the boss health bar halfway marker
         this.earthquakeZones = []; // Array to hold active earthquake zones
-        this.customProjectileGraphics = null; // Graphics object for projectiles with custom draw
+        // Removed: this.livesDisplayElement = null; // Reference to the HTML *Game Over* lives display element (Now handled by Phaser text)
+        this.gameLivesCounterElement = null; // Reference to the HTML *In-Game* lives counter element
+        // Removed: this.countdownText = null; // Phaser Text object for the wave countdown
+        this.countdownDisplayElement = null; // Reference to the HTML countdown display element
+        this.deathLivesText = null; // Phaser Text object for lives remaining on death screen
+
+        // --- Score System ---
+        this.score = 0;
+        this.kills = 0;
+        this.deaths = 0;
+        this.startTime = 0;
+        this.elapsedTime = 0; // In seconds
+        this.bossKilled = false; // Track if the boss was killed during this run
+        this.scoreDisplayElement = null; // Reference to the HTML score display element
+        this.instructionsContainer = null; // Container for instructions UI
+        this.instructionsOverlay = null; // Overlay for instructions pause state
+
+        // --- Endless Mode ---
+        this.endlessMode = false;
+        this.startingWave = 1;
+    }
+
+    init(data) {
+        this.endlessMode = data.endlessMode || false;
+        this.startingWave = data.startingWave || 1;
+        console.log(`GameScreen initialized. Endless Mode: ${this.endlessMode}, Starting Wave: ${this.startingWave}`);
     }
  
     preload() {
@@ -249,34 +280,18 @@ export default class GameScreen extends Phaser.Scene {
         // Force a scale refresh after scene creation to ensure dimensions are correct
         this.scale.refresh();
 
-        // --- Debug Key for Powerup Selection ---
-        this.input.keyboard.on('keydown-P', () => {
-            console.log("Debug: Opening Powerup Selection...");
-            this.openPowerupSelection();
-        });
-
         // --- Wave Manager Setup ---
-        this.waveManager = new WaveManager(this, this.enemyManager);
-        this.waveManager.startNextWave(); // Start the first wave
+        // Pass endlessMode flag to WaveManager constructor
+        this.waveManager = new WaveManager(this, this.enemyManager, { endlessMode: this.endlessMode });
 
-        // --- Debug Key for Clearing Wave ---
-        this.input.keyboard.on('keydown-J', () => {
-            console.log("Debug: Clearing current wave...");
-            if (this.waveManager && this.waveManager.waveActive) {
-                // Iterate through all active enemies and kill them
-                this.enemies.forEach(enemy => {
-                    if (enemy && enemy.state !== 'dead') {
-                        // Use takeDamage with max health to ensure death logic runs (plasma drop, wave manager report)
-                        enemy.takeDamage(enemy.health * 2); // Deal more than enough damage
-                    }
-                });
-                console.log("Debug: All active enemies marked for removal.");
-                // The WaveManager's update loop should now detect the wave end naturally
-                // as enemies are removed and reportEnemyDestroyed is called.
-            } else {
-                console.log("Debug: No active wave to clear.");
-            }
-        });
+        // Start the appropriate wave
+        if (this.startingWave > 1) {
+            console.log(`Jumping to starting wave: ${this.startingWave}`);
+            this.waveManager.jumpToWave(this.startingWave);
+        } else {
+            console.log("Starting first wave normally.");
+            this.waveManager.startNextWave(); // Start the first wave
+        }
 
         // --- Clear Plasma Button Setup ---
         this.clearPlasmaButtonElement = document.getElementById('clear-plasma-button');
@@ -299,32 +314,57 @@ export default class GameScreen extends Phaser.Scene {
         }
         // --- End Boss Health Bar UI Setup ---
 
-        // --- Custom Projectile Graphics Setup ---
-        this.customProjectileGraphics = this.add.graphics();
-        this.customProjectileGraphics.setDepth(1.7); // Depth similar to other projectiles or slightly above
-        // --- End Custom Projectile Graphics Setup ---
+        // --- Game Over Lives Display UI Setup REMOVED (Now handled by Phaser text in handlePlayerDeath) ---
+
+        // --- In-Game Lives Counter UI Setup ---
+        this.gameLivesCounterElement = document.getElementById('game-lives-counter');
+        if (this.gameLivesCounterElement) {
+            this.gameLivesCounterElement.style.display = 'block'; // Show the element during gameplay
+            this.gameLivesCounterElement.innerText = `Lives: ${this.player.lives}`; // Set initial value
+        } else {
+            console.error("In-Game Lives counter element ('game-lives-counter') not found in HTML!");
+        }
+        // --- End In-Game Lives Counter UI Setup ---
+
+        // --- HTML Countdown Timer UI Setup ---
+        this.countdownDisplayElement = document.getElementById('countdown-display');
+        if (!this.countdownDisplayElement) {
+            console.error("Countdown display element not found in HTML!");
+        }
+        // --- Score Display UI Setup ---
+        this.scoreDisplayElement = document.getElementById('score-display');
+        if (this.scoreDisplayElement) {
+            this.scoreDisplayElement.style.display = 'block'; // Show the element
+            this.scoreDisplayElement.innerText = `Score: 0`; // Initial value
+        } else {
+            console.error("Score display element ('score-display') not found in HTML!");
+        }
+        // --- End Score Display UI Setup ---
+
+        // --- Instructions UI Setup ---
+        this.createInstructionsUI();
+        // --- End Instructions UI Setup ---
+
+        // Initialize start time for score calculation
+        this.startTime = this.time.now;
+        this.score = 0;
+        this.kills = 0;
+        this.deaths = 0;
+        this.bossKilled = false; // Reset boss kill status for new game
     }
 
     update(time, delta) {
         // Ensure all necessary components exist
         if (!this.player || !this.worldManager || !this.inputHandler || !this.playerVisual) return;
 
+        // Calculate elapsed time for scoring
+        this.elapsedTime = (this.time.now - this.startTime) / 1000; // Time in seconds
+
         const dtSeconds = delta / 1000; // Delta time in seconds
 
         // Update InputHandler first to capture current state
         this.inputHandler.update();
  
-        // --- Debug: Skip to Wave 15 ---
-        if (this.inputHandler.wasPressed('KeyO')) { // Check if 'O' key was just pressed
-            if (this.waveManager) {
-                console.log("Debug: Jumping to Wave 15...");
-                this.waveManager.jumpToWave(15);
-            } else {
-                console.warn("Debug: Cannot jump wave, WaveManager not found.");
-            }
-        }
-        // --- End Debug ---
-
         // Update Player logic (handles input, physics, state)
         // Pass delta in seconds, and the scene as the 'world' context for interactions
         this.player.update(dtSeconds, this);
@@ -436,41 +476,14 @@ export default class GameScreen extends Phaser.Scene {
 
         // --- Update Projectiles ---
         this.projectiles.forEach(projectile => {
-            // Pass worldContext to projectile update if needed (e.g., for dynamite explosion checks)
-            projectile.update(dtSeconds, worldContext);
+            projectile.update(dtSeconds);
 
-            // Sync visual position (visuals are now created/managed by addProjectile)
+            // Sync visual position
             const visual = this.projectileVisuals.get(projectile.id);
-            // Only update position/rotation if the visual exists AND is not the dummy graphics object used for Dynamite
-            if (visual && visual.type !== 'Graphics' && projectile.state !== 'dead') {
+            if (visual) {
                 visual.setPosition(projectile.x, projectile.y);
-                // Update rotation for projectiles that need it (like dynamite - though its visual is dummy)
-                // Standard projectiles and railgun visuals get rotation updated here.
-                 if (typeof projectile.angle === 'number' && !(projectile instanceof DynamiteProjectile)) { // Don't rotate dummy visual
-                    visual.setRotation(projectile.angle);
-                 } else if (projectile instanceof Projectile && !(projectile instanceof DynamiteProjectile)) {
-                     // Set rotation based on velocity/direction for non-dynamite projectiles if angle isn't directly set
-                     const angle = Math.atan2(projectile.velocityY || projectile.direction.y, projectile.velocityX || projectile.direction.x);
-                     visual.setRotation(angle);
-                 }
-            }
-            // Note: DynamiteProjectile handles its own drawing via its draw method.
-            // We will call it explicitly below.
-        });
-
-        // --- Draw Custom Projectiles ---
-        // Clear the dedicated graphics object each frame
-        if (this.customProjectileGraphics) {
-            this.customProjectileGraphics.clear();
-        }
-        // Iterate projectiles and call custom draw methods
-        this.projectiles.forEach(projectile => {
-            if (projectile.state !== 'dead' && typeof projectile.draw === 'function') {
-                // Pass the dedicated graphics object and camera to the draw method
-                projectile.draw(this.customProjectileGraphics, this.cameras.main);
             }
         });
-        // --- End Draw Custom Projectiles ---
         // --- End Update Projectiles ---
 
         // --- Gameplay Collision Detection & Handling (Attacks, Damage, Pickups) ---
@@ -657,6 +670,17 @@ export default class GameScreen extends Phaser.Scene {
                 if (this.waveManager) {
                     this.waveManager.reportEnemyDestroyed();
                 }
+
+                // --- Score Tracking: Increment Kills ---
+                this.kills++;
+                console.log(`Kill registered. Total kills: ${this.kills}`);
+                // Check if the killed enemy was the boss
+                if (enemy instanceof EngineerEnemy) {
+                    this.bossKilled = true;
+                    console.log("Boss killed! Score multiplier will be applied.");
+                }
+                // --- End Score Tracking ---
+
                 // --- End Spawn Plasma ---
 
                 // Handle enemy visual removal
@@ -764,6 +788,36 @@ if (this.tileCoordsElement && this.player) {
         this.updateBossHealthBarUI();
         this.updateEarthquakeZones(dtSeconds); // Update earthquake zones
         // --- End Update Boss Health Bar UI ---
+
+        // --- Update In-Game Lives Counter UI ---
+        if (this.gameLivesCounterElement && this.player) {
+            this.gameLivesCounterElement.innerText = `Lives: ${this.player.lives}`;
+        }
+        // --- End In-Game Lives Counter UI ---
+
+        // --- Update HTML Countdown Timer UI ---
+        if (this.waveManager && this.countdownDisplayElement) {
+            const countdownTime = this.waveManager.getCountdownTime(); // Returns seconds or null
+            if (countdownTime !== null) {
+                this.countdownDisplayElement.innerText = `Next Wave: ${countdownTime}`;
+                this.countdownDisplayElement.style.display = 'block';
+            } else {
+                this.countdownDisplayElement.style.display = 'none';
+            }
+        }
+        // --- End Update HTML Countdown Timer UI ---
+
+        // --- Score Calculation (Basic - Final calculation happens at game over) ---
+        // We can display a running score, but the multiplier is applied at the end.
+        const baseScore = (this.kills * POINTS_PER_KILL) + Math.floor(this.elapsedTime * POINTS_PER_SECOND) - (this.deaths * PENALTY_PER_DEATH);
+        this.score = baseScore; // Update the score property
+
+        // --- Update Score Display UI ---
+        if (this.scoreDisplayElement) {
+            this.scoreDisplayElement.innerText = `Score: ${this.score}`;
+        }
+        // --- End Update Score Display UI ---
+
     } // End of update method
 
     // --- Collision Resolution Method ---
@@ -833,22 +887,25 @@ if (this.tileCoordsElement && this.player) {
 
 handlePlayerDeath() {
     // Clear any existing death UI elements if they somehow persist
-    if (this.deathText) this.deathText.destroy();
-    if (this.respawnButton) this.respawnButton.destroy();
+    if (this.respawnOverlay) { this.respawnOverlay.destroy(); this.respawnOverlay = null; }
+    if (this.deathText) { this.deathText.destroy(); this.deathText = null; }
+    if (this.deathLivesText) { this.deathLivesText.destroy(); this.deathLivesText = null; } // Clear lives text
+    if (this.respawnButton) { this.respawnButton.destroy(); this.respawnButton = null; }
+    if (this.respawnButtonBrackets) { this.respawnButtonBrackets.destroy(); this.respawnButtonBrackets = null; } // Clear brackets
+
 
     const deathX = this.player.x; // Capture death location
     const deathY = this.player.y;
     console.log(`GameScreen: Handling player death at (${deathX.toFixed(0)}, ${deathY.toFixed(0)}).`);
 
-    // Optional: Show a "You Died" message or fade the screen
-    // Store death text reference on the scene
-    this.deathText = this.add.text(this.cameras.main.centerX, this.cameras.main.centerY - 50, 'YOU DIED', {
-        fontSize: '64px',
-        fill: '#ff0000', // Red color
-        stroke: '#000000',
-        strokeThickness: 6,
-        align: 'center'
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(11); // Keep fixed on screen, above UI
+    // --- Score Tracking: Increment Deaths ---
+    this.deaths++;
+    console.log(`Death registered. Total deaths: ${this.deaths}`);
+    // --- End Score Tracking ---
+
+    // Decrement lives
+    this.player.lives--;
+    console.log(`Player lives remaining: ${this.player.lives}`);
 
     // Hide player visual immediately
     if (this.playerVisual) {
@@ -866,39 +923,212 @@ handlePlayerDeath() {
     if (this.waveCounterElement) this.waveCounterElement.style.display = 'none'; // Hide wave counter
     if (this.clearPlasmaButtonElement) this.clearPlasmaButtonElement.style.display = 'none'; // Hide clear plasma button
     if (this.bossHealthBarContainerElement) this.bossHealthBarContainerElement.style.display = 'none'; // Hide boss health bar
+    if (this.gameLivesCounterElement) this.gameLivesCounterElement.style.display = 'none'; // Hide IN-GAME lives counter
+    if (this.scoreDisplayElement) this.scoreDisplayElement.style.display = 'none'; // Hide score display on death screen
+    // Note: HTML lives-display is no longer used
+    if (this.countdownDisplayElement) this.countdownDisplayElement.style.display = 'none'; // Hide countdown on death
 
-    // Create Respawn Button
-    this.respawnButton = this.add.text(this.cameras.main.centerX, this.cameras.main.centerY + 50, 'Respawn', {
-        fontSize: '32px',
-        fill: '#ffffff',
-        backgroundColor: '#555555',
-        padding: { x: 20, y: 10 },
-        align: 'center'
-    })
-    .setOrigin(0.5)
-    .setScrollFactor(0)
-    .setDepth(11)
-    .setInteractive({ useHandCursor: true }); // Make it clickable
+    if (this.player.lives > 0) {
+        // Still has lives, show respawn option
+        console.log("Player has lives remaining, showing respawn option.");
 
-    // Add click listener
-    this.respawnButton.on('pointerdown', () => {
-        console.log("Respawn button clicked.");
-        this.respawnPlayer(); // Call respawn (no location needed)
-    });
+        const { width, height } = this.cameras.main;
+        const centerX = width / 2;
+        const centerY = height / 2;
+
+        // --- Theming (Consistent with GameOverScene) ---
+        const theme = {
+            primaryColor: '#FF6B00', // Martian Orange
+            secondaryColor: '#00E0FF', // Tech Cyan
+            textColor: '#E0E0E0', // Light Grey/White
+            backgroundColor: '#201510', // Dark Reddish Brown
+            overlayAlpha: 0.85,
+            fontFamily: 'Consolas, "Courier New", monospace', // Tech font
+            titleFontSize: '80px', // Slightly larger for impact
+            buttonFontSize: '42px',
+            strokeColor: '#111111',
+            buttonBgColor: '#443020', // Darker Brown/Orange
+            buttonHoverBgColor: '#664530',
+            buttonTextColor: '#00E0FF', // Cyan text on buttons
+            buttonHoverTextColor: '#FFFFFF',
+            gameOverColor: '#FF4444', // Distinct red for failure
+        };
+
+        // --- Add Themed Overlay ---
+        this.respawnOverlay = this.add.graphics({ fillStyle: { color: Phaser.Display.Color.HexStringToColor(theme.backgroundColor).color, alpha: theme.overlayAlpha } });
+        this.respawnOverlay.fillRect(0, 0, width, height);
+        this.respawnOverlay.setScrollFactor(0); // Keep fixed on screen
+        this.respawnOverlay.setDepth(10); // Below text/button
+
+        // --- Themed "You Died" Text ---
+        this.deathText = this.add.text(centerX, centerY - 100, `// UNIT OFFLINE //`, { // Adjusted Y position slightly up
+            fontSize: theme.titleFontSize,
+            fill: theme.gameOverColor,
+            fontFamily: theme.fontFamily,
+            fontStyle: 'bold',
+            stroke: theme.strokeColor,
+            strokeThickness: 6,
+            align: 'center',
+            shadow: { offsetX: 2, offsetY: 2, color: '#111', blur: 4, fill: true }
+        }).setOrigin(0.5).setScrollFactor(0).setDepth(11);
+
+        // --- Themed "Lives Remaining" Text (Phaser) ---
+        this.deathLivesText = this.add.text(centerX, centerY - 30, `LIVES REMAINING: ${this.player.lives}`, { // Positioned below death text
+            fontSize: '32px', // Slightly smaller than button/title
+            fill: theme.textColor, // Use standard text color
+            fontFamily: theme.fontFamily,
+            stroke: theme.strokeColor,
+            strokeThickness: 3,
+            align: 'center'
+        }).setOrigin(0.5).setScrollFactor(0).setDepth(11);
+
+
+        // --- Themed Respawn Button ---
+        const buttonBaseStyle = {
+            fontSize: theme.buttonFontSize,
+            fontFamily: theme.fontFamily,
+            fill: theme.buttonTextColor,
+            backgroundColor: theme.buttonBgColor,
+            padding: { x: 30, y: 18 },
+            align: 'center'
+        };
+        const buttonHoverStyle = {
+            fill: theme.buttonHoverTextColor,
+            backgroundColor: theme.buttonHoverBgColor,
+        };
+
+        this.respawnButton = this.add.text(centerX, centerY + 50, 'REACTIVATE', buttonBaseStyle) // Adjusted Y position slightly up
+            .setOrigin(0.5)
+            .setScrollFactor(0)
+            .setDepth(11)
+            .setInteractive({ useHandCursor: true });
+
+        // --- Helper to add decorative brackets (copied from GameOverScene logic) ---
+        const addBrackets = (button) => {
+            const bracketColor = Phaser.Display.Color.HexStringToColor(theme.secondaryColor).color;
+            const bracketThickness = 2;
+            const bracketLength = 20;
+            const bracketOffset = 10;
+
+            const bounds = button.getBounds();
+            // Create graphics relative to the button's position, considering scroll factor
+            const graphics = this.add.graphics({ x: button.x, y: button.y }).setScrollFactor(0).setDepth(button.depth);
+
+            // Adjust bounds relative to the button's origin (0.5, 0.5)
+            const relLeft = -bounds.width / 2;
+            const relTop = -bounds.height / 2;
+            const relRight = bounds.width / 2;
+            const relBottom = bounds.height / 2;
+
+            graphics.lineStyle(bracketThickness, bracketColor, 0.8);
+            // Top-left
+            graphics.beginPath();
+            graphics.moveTo(relLeft - bracketOffset, relTop - bracketOffset + bracketLength);
+            graphics.lineTo(relLeft - bracketOffset, relTop - bracketOffset);
+            graphics.lineTo(relLeft - bracketOffset + bracketLength, relTop - bracketOffset);
+            graphics.strokePath();
+            // Top-right
+            graphics.beginPath();
+            graphics.moveTo(relRight + bracketOffset - bracketLength, relTop - bracketOffset);
+            graphics.lineTo(relRight + bracketOffset, relTop - bracketOffset);
+            graphics.lineTo(relRight + bracketOffset, relTop - bracketOffset + bracketLength);
+            graphics.strokePath();
+            // Bottom-left
+            graphics.beginPath();
+            graphics.moveTo(relLeft - bracketOffset, relBottom + bracketOffset - bracketLength);
+            graphics.lineTo(relLeft - bracketOffset, relBottom + bracketOffset);
+            graphics.lineTo(relLeft - bracketOffset + bracketLength, relBottom + bracketOffset);
+            graphics.strokePath();
+            // Bottom-right
+            graphics.beginPath();
+            graphics.moveTo(relRight + bracketOffset - bracketLength, relBottom + bracketOffset);
+            graphics.lineTo(relRight + bracketOffset, relBottom + bracketOffset);
+            graphics.lineTo(relRight + bracketOffset, relBottom + bracketOffset - bracketLength);
+            graphics.strokePath();
+
+            return graphics;
+        };
+
+        // Add brackets to the button
+        this.respawnButtonBrackets = addBrackets(this.respawnButton);
+
+        // Add hover effects
+        this.respawnButton.on('pointerover', () => {
+            this.respawnButton.setStyle({ ...buttonBaseStyle, ...buttonHoverStyle });
+            if (this.respawnButtonBrackets) this.respawnButtonBrackets.setAlpha(1.0); // Make brackets brighter on hover
+        });
+        this.respawnButton.on('pointerout', () => {
+            this.respawnButton.setStyle(buttonBaseStyle);
+            if (this.respawnButtonBrackets) this.respawnButtonBrackets.setAlpha(0.8); // Dim brackets slightly
+        });
+
+        // Add click listener
+        this.respawnButton.on('pointerdown', () => {
+            console.log("Reactivate button clicked.");
+            this.respawnPlayer(); // Call respawn
+        });
+
+    } else {
+        // No lives left, game over
+        // Hide the overlay if transitioning directly to game over
+        if (this.respawnOverlay) { this.respawnOverlay.destroy(); this.respawnOverlay = null; }
+        console.log("Player out of lives. Game Over.");
+
+        // Get final wave number
+        const finalWave = this.waveManager ? this.waveManager.getCurrentWave() : 1; // Default to 1 if manager not found
+
+        // --- Calculate Final Score ---
+        // Base score calculation (same as in update, but captured at the end)
+        const baseScore = (this.kills * POINTS_PER_KILL) + Math.floor(this.elapsedTime * POINTS_PER_SECOND) - (this.deaths * PENALTY_PER_DEATH);
+        // Apply boss multiplier if applicable
+        const finalScore = this.bossKilled ? Math.floor(baseScore * BOSS_KILL_MULTIPLIER) : baseScore;
+        console.log(`Game Over. Base Score: ${baseScore}, Boss Killed: ${this.bossKilled}, Final Score: ${finalScore}`);
+        // --- End Final Score Calculation ---
+
+
+        // Transition to GameOverScene
+        // Ensure other scenes are stopped/cleaned up if necessary before starting GameOver
+        // this.scene.stop('PowerupSelectionScreen'); // Example if it could be open
+        this.scene.start('GameOverScene', {
+            waveReached: finalWave,
+            endlessMode: this.endlessMode, // Pass endless mode status
+            outOfLives: true, // Indicate game over was due to running out of lives
+            // --- Pass Score Data ---
+            finalScore: finalScore,
+            kills: this.kills,
+            deaths: this.deaths,
+            timeSurvived: Math.floor(this.elapsedTime), // Pass time in seconds
+            bossKilled: this.bossKilled
+            // --- End Pass Score Data ---
+        });
+    }
 }
 
 respawnPlayer() { // No longer needs death location
-    console.log(`GameScreen: Respawning player near (0, 0).`);
+    console.log(`GameScreen: Reactivating unit near (0, 0).`); // Thematic log
 
-    // Remove death UI elements
+    // Remove death UI elements (including overlay and brackets)
+    if (this.respawnOverlay) {
+        this.respawnOverlay.destroy();
+        this.respawnOverlay = null;
+    }
     if (this.deathText) {
         this.deathText.destroy();
         this.deathText = null;
     }
+    if (this.deathLivesText) { // Destroy the lives text
+        this.deathLivesText.destroy();
+        this.deathLivesText = null;
+    }
     if (this.respawnButton) {
-        this.respawnButton.destroy();
+        this.respawnButton.destroy(); // Destroys the text object
         this.respawnButton = null;
     }
+     if (this.respawnButtonBrackets) {
+        this.respawnButtonBrackets.destroy(); // Destroy the graphics object for brackets
+        this.respawnButtonBrackets = null;
+    }
+
 
     // Reset player state and health
     this.player.health = this.player.maxHealth;
@@ -992,7 +1222,10 @@ respawnPlayer() { // No longer needs death location
          }
     }
     if (this.clearPlasmaButtonElement) this.clearPlasmaButtonElement.style.display = 'block'; // Show clear plasma button
-    // Boss health bar remains hidden on respawn unless a boss is active
+    if (this.gameLivesCounterElement) this.gameLivesCounterElement.style.display = 'block'; // Show IN-GAME lives counter
+    if (this.scoreDisplayElement) this.scoreDisplayElement.style.display = 'block'; // Show score display on respawn
+    // HTML lives-display is no longer used
+    // Countdown display remains hidden on respawn unless explicitly shown by WaveManager update
 
     // Update UI immediately
     // Update HTML Plasma Counter
@@ -1003,8 +1236,10 @@ respawnPlayer() { // No longer needs death location
          this.playerHpText.setText(`HP: ${this.player.health}/${this.player.maxHealth}`);
          this.playerHpText.setFill('#00FF00'); // Reset color to green on respawn
     }
-    if (this.clearPlasmaButtonElement) this.clearPlasmaButtonElement.style.display = 'block'; // Show clear plasma button
-    // Boss health bar remains hidden on respawn unless a boss is active
+    // Update In-Game Lives Counter immediately on respawn
+    if (this.gameLivesCounterElement && this.player) {
+        this.gameLivesCounterElement.innerText = `Lives: ${this.player.lives}`;
+    }
     // Optional: Add brief invulnerability or visual effect on respawn
     if (this.playerVisual) {
         this.playerVisual.setAlpha(0.5); // Make slightly transparent
@@ -1228,85 +1463,61 @@ createOrUpdateStunEffect(enemy) {
         // Screen shake is now handled specifically on player hit
     }
 
-    // --- Generic Projectile Adding ---
-    addProjectile(projectileInstance) {
-        if (!projectileInstance || !projectileInstance.id) {
-             console.error("Attempted to add invalid projectile instance:", projectileInstance);
-             return null;
-        }
-
-        this.projectiles.push(projectileInstance);
-
-        // Create visual based on projectile type
-        let visual = null; // Initialize visual as null
-
-        if (projectileInstance instanceof DynamiteProjectile) {
-            // Dynamite uses its own draw method. We don't create a Phaser visual to render.
-            // However, we might need a placeholder in the map if cleanup logic relies on it.
-            // Let's use a simple flag or skip adding to the map for dynamite.
-            // For simplicity, we won't add a visual to the map for Dynamite.
-             console.log(`Dynamite projectile ${projectileInstance.id} added (no separate visual created).`);
-        } else if (projectileInstance instanceof RailgunProjectile) {
-            visual = this.add.image(projectileInstance.x, projectileInstance.y, 'plasma_bullet');
-            visual.rotation = Math.atan2(projectileInstance.velocityY, projectileInstance.velocityX); // Use velocity for initial angle
-            visual.texture.setFilter(Phaser.Textures.FilterMode.NEAREST);
-            const chargeRatio = projectileInstance.chargeRatio || 0;
-            const scaleX = (1.0 + chargeRatio * 2.0) * 2.0;
-            const scaleY = (0.5 + chargeRatio * 0.8) * 2.0;
-            visual.setScale(scaleX, scaleY);
-            const blueIntensity = 155 + Math.floor(100 * chargeRatio);
-            const greenIntensity = 100 + Math.floor(155 * chargeRatio);
-            const tintColor = Phaser.Display.Color.GetColor(255, greenIntensity, blueIntensity);
-            visual.setTint(tintColor);
-            const glowIntensity = 0.5 + chargeRatio * 0.5;
-            visual.postFX.addGlow(tintColor, glowIntensity, 0, false, 0.1, 5 + chargeRatio * 5);
-            visual.setDepth(1.6);
-        } else if (projectileInstance instanceof Projectile) { // Standard projectile
-            visual = this.add.image(projectileInstance.x, projectileInstance.y, 'bullet');
-            visual.rotation = Math.atan2(projectileInstance.direction.y, projectileInstance.direction.x);
-            visual.texture.setFilter(Phaser.Textures.FilterMode.NEAREST);
-            visual.setDepth(1.5);
-        } else {
-            console.warn(`Unknown projectile type added: ${projectileInstance.constructor.name}`);
-            // Create a default visual (e.g., small circle)
-            visual = this.add.circle(projectileInstance.x, projectileInstance.y, 5, 0xff00ff); // Magenta circle for unknown
-            visual.setDepth(1.5);
-        }
-
-        // Only add to map if a visual was actually created
-        if (visual) {
-             this.projectileVisuals.set(projectileInstance.id, visual);
-             console.log(`Added projectile ${projectileInstance.id} (${projectileInstance.constructor.name}) with visual.`);
-        } else if (!(projectileInstance instanceof DynamiteProjectile)) {
-             console.warn(`No visual created for projectile ${projectileInstance.id} (${projectileInstance.constructor.name})`);
-        }
-
-
-        return projectileInstance;
-    }
-
-
-    // --- Specific Projectile Creation (Refactored) ---
+    // --- Projectile Creation ---
     createProjectile(x, y, direction, speed, damage, ownerId, type = 'projectile') {
-        // Ensure direction is normalized if needed by Projectile constructor
-        const len = Math.sqrt(direction.x * direction.x + direction.y * direction.y);
-        const normalizedDir = (len > 0) ? { x: direction.x / len, y: direction.y / len } : { x: 1, y: 0 }; // Default to right if length is 0
+        // Create the logical projectile instance
+        // Pass options object correctly
+        const projectile = new Projectile(x, y, direction, speed, damage, ownerId, type, {}); // Pass type in constructor, empty options obj
+        this.projectiles.push(projectile);
 
-        const projectile = new Projectile(x, y, normalizedDir, speed, damage, ownerId, type, {});
-        return this.addProjectile(projectile); // Use the generic adder
+        // Create the visual representation using the preloaded bullet image
+        const visual = this.add.image(x, y, 'bullet');
+        visual.rotation = Math.atan2(direction.y, direction.x);
+        visual.texture.setFilter(Phaser.Textures.FilterMode.NEAREST);
+        visual.setDepth(1.5);
+        this.projectileVisuals.set(projectile.id, visual);
+
+        console.log(`Created projectile ${projectile.id} of type ${type} at (${x.toFixed(0)}, ${y.toFixed(0)}) owned by ${ownerId}`);
+        return projectile;
     }
 
+    // --- NEW: Railgun Projectile Creation ---
     createRailgunProjectile(x, y, directionX, directionY, damage, speed, chargeRatio) {
-        const direction = { x: directionX, y: directionY };
-        // Normalize direction if needed
-        const len = Math.sqrt(direction.x * direction.x + direction.y * direction.y);
-        const normalizedDir = (len > 0) ? { x: direction.x / len, y: direction.y / len } : { x: 1, y: 0 };
+        const direction = { x: directionX, y: directionY }; // Ensure direction is an object
 
-        const projectile = new RailgunProjectile(x, y, normalizedDir, speed, damage, this.player.id, chargeRatio, {});
-        return this.addProjectile(projectile); // Use the generic adder
+        // Create the logical railgun projectile instance
+        const projectile = new RailgunProjectile(x, y, direction, speed, damage, this.player.id, chargeRatio, {}); // Pass empty options obj
+        this.projectiles.push(projectile);
+
+        // Create the visual representation (using bullet for now, maybe scaled/tinted)
+        // TODO: Use a dedicated railgun beam asset if available
+        const visual = this.add.image(x, y, 'plasma_bullet'); // Use the new plasma bullet image
+        visual.rotation = Math.atan2(direction.y, direction.x);
+        visual.texture.setFilter(Phaser.Textures.FilterMode.NEAREST);
+
+        // Scale visual based on chargeRatio (e.g., thicker beam for full charge)
+        // Double the base scale and the charge-based scaling
+        const scaleX = (1.0 + chargeRatio * 2.0) * 2.0; // Length scales more with charge, then doubled
+        const scaleY = (0.5 + chargeRatio * 0.8) * 2.0; // Width scales less, then doubled
+        visual.setScale(scaleX, scaleY);
+
+        // Tint based on charge (e.g., brighter/whiter for full charge)
+        const blueIntensity = 155 + Math.floor(100 * chargeRatio); // 155 to 255
+        const greenIntensity = 100 + Math.floor(155 * chargeRatio); // 100 to 255
+        const tintColor = Phaser.Display.Color.GetColor(255, greenIntensity, blueIntensity); // White-cyan-ish
+        visual.setTint(tintColor);
+
+        // Add a subtle glow, stronger with charge
+        const glowIntensity = 0.5 + chargeRatio * 0.5; // 0.5 to 1.0
+        visual.postFX.addGlow(tintColor, glowIntensity, 0, false, 0.1, 5 + chargeRatio * 5);
+
+
+        visual.setDepth(1.6); // Slightly above normal projectiles?
+        this.projectileVisuals.set(projectile.id, visual);
+
+        console.log(`Created RAILGUN projectile ${projectile.id} at (${x.toFixed(0)}, ${y.toFixed(0)}) with charge ${chargeRatio.toFixed(2)}`);
+        return projectile;
     }
-    // Note: The EngineerEnemy's throwDynamite method calls scene.addProjectile directly
-    // with the already created DynamiteProjectile instance.
 
     // 2. Make the Dash Trail White
     createDashTrailEffect(x, y) {
@@ -1845,6 +2056,24 @@ createOrUpdateStunEffect(enemy) {
         }
     }
     // --- End Wave UI Update ---
+
+    // --- HTML Countdown UI Control Methods ---
+    startInterWaveCountdown(durationSeconds) {
+        if (this.countdownDisplayElement) {
+            this.countdownDisplayElement.innerText = `Next Wave: ${durationSeconds}`;
+            this.countdownDisplayElement.style.display = 'block';
+            console.log(`GameScreen: Displaying HTML countdown UI for ${durationSeconds} seconds.`);
+        }
+    }
+
+    hideCountdownUI() {
+        if (this.countdownDisplayElement) {
+            this.countdownDisplayElement.style.display = 'none';
+            console.log("GameScreen: Hiding HTML countdown UI.");
+        }
+    }
+    // --- End HTML Countdown UI Control Methods ---
+
     // --- End Powerup Selection Flow ---
 // --- Resize Handler ---
 handleResize(gameSize) {
@@ -1915,6 +2144,23 @@ shutdown() {
         if (this.bossHealthBarContainerElement) {
             this.bossHealthBarContainerElement.style.display = 'none';
         }
+        // Hide in-game lives display on shutdown
+        if (this.gameLivesCounterElement) { // In-Game display
+            this.gameLivesCounterElement.style.display = 'none';
+        }
+        // Destroy Phaser death lives text if it exists
+        if (this.deathLivesText) {
+            this.deathLivesText.destroy();
+            this.deathLivesText = null;
+        }
+        // Hide HTML countdown display on shutdown
+        if (this.countdownDisplayElement) {
+            this.countdownDisplayElement.style.display = 'none';
+        }
+        // Hide score display on shutdown
+        if (this.scoreDisplayElement) {
+            this.scoreDisplayElement.style.display = 'none';
+        }
 
         // Destroy WaveManager
         if (this.waveManager) {
@@ -1928,46 +2174,183 @@ shutdown() {
         this.playerVisual = null;
         this.playerShadow = null;
         if (this.playerShadow) this.playerShadow.destroy();
-        this.debugGraphics = null; // Already destroyed if exists
-        if (this.customProjectileGraphics) { // Destroy custom graphics object
-             this.customProjectileGraphics.destroy();
-             this.customProjectileGraphics = null;
-        }
+        this.debugGraphics = null;
+        if (this.debugGraphics) this.debugGraphics.destroy();
         // Destroy any remaining enemy visuals
         this.enemyVisuals.forEach(visual => visual.destroy());
         this.enemyVisuals.clear();
         this.enemies = []; // Clear the enemy array
         // Destroy any remaining projectile visuals
-        this.projectileVisuals.forEach(visual => {
-            // Check if visual exists and has a destroy method before calling it
-            if (visual && typeof visual.destroy === 'function') {
-                 visual.destroy();
-            }
-        });
+        this.projectileVisuals.forEach(visual => visual.destroy());
         this.projectileVisuals.clear();
         this.projectiles = []; // Clear the projectile array
-
-        // Clear earthquake zones and their visuals/tweens
+        // Clear earthquake zones
         this.earthquakeZones.forEach(zone => {
-            if (zone.visual) {
-                 // Attempt to stop the tween associated with the visual
-                 const zoneTween = zone.visual.getData('tweens') ? zone.visual.getData('tweens')[0] : null;
-                 if (zoneTween && typeof zoneTween.stop === 'function') {
-                     try {
-                         zoneTween.stop();
-                     } catch (e) {
-                         console.warn("Error stopping earthquake zone tween:", e);
-                     }
-                 }
-                 // Destroy the visual itself
-                 if (typeof zone.visual.destroy === 'function') {
-                    zone.visual.destroy();
-                 }
-            }
+            if (zone.visual) zone.visual.destroy();
         });
         this.earthquakeZones = [];
+        if (this.instructionsContainer) this.instructionsContainer.destroy();
+        if (this.instructionsOverlay) this.instructionsOverlay.destroy(); // Clean up overlay
 
     }
+
+    // --- Instructions UI Creation & Dismissal ---
+    createInstructionsUI() {
+        // Removed the check for this.scene.isPaused here, as it was preventing UI creation.
+        // We will still pause physics later in this function.
+
+        const padding = 15;
+        const textWidth = 320; // Max width for text wrapping
+        const { width: cameraWidth, height: cameraHeight } = this.cameras.main;
+        const centerX = cameraWidth / 2;
+        const centerY = cameraHeight / 2;
+
+        // Martian-themed instructional text
+        const instructionsTextContent = `== MARS SURVIVAL PROTOCOL ==
+Controls:
+  [W][A][S][D] - Maneuver Rover
+  [Left Click] - Fire Standard Issue Blaster
+  [Right Click] - Fire Plasma Overcharge (Consumes Plasma)
+
+Plasma Resource:
+  Collect glowing blue Plasma dropped by deactivated hostiles.
+  Plasma fuels your powerful Overcharge shot. Manage it wisely, Recruit!
+
+Objective:
+  Locate and neutralize the rogue Engineer unit. The fate of the Mars colony depends on you!`;
+
+        const textStyle = {
+            fontSize: '14px',
+            fill: '#FFD700', // Gold/Yellow
+            fontFamily: 'Consolas, "Courier New", monospace',
+            align: 'left',
+            wordWrap: { width: textWidth, useAdvancedWrap: true },
+            stroke: '#A0522D', // Sienna/Brown
+            strokeThickness: 1,
+            lineSpacing: 4
+        };
+
+        // Create the text object first to get its dimensions
+        const tempText = this.add.text(0, 0, instructionsTextContent, textStyle).setVisible(false);
+        const textHeight = tempText.height;
+        tempText.destroy(); // Remove temporary text
+
+        const panelWidth = textWidth + padding * 2;
+        const panelHeight = textHeight + padding * 2 + 10; // Add a little extra height for the button clearance
+        const panelX = centerX - panelWidth / 2; // Center horizontally
+        const panelY = centerY - panelHeight / 2; // Center vertically
+
+        // --- Add Overlay ---
+        this.instructionsOverlay = this.add.graphics({ fillStyle: { color: 0x000000, alpha: 0.7 } });
+        this.instructionsOverlay.fillRect(0, 0, cameraWidth, cameraHeight);
+        this.instructionsOverlay.setScrollFactor(0);
+        this.instructionsOverlay.setDepth(999); // Increased depth significantly
+        this.instructionsOverlay.setInteractive(); // Block clicks behind the panel
+        console.log(`Instructions Overlay created. Size: (${cameraWidth}x${cameraHeight}), Depth: ${this.instructionsOverlay.depth}`);
+
+        // --- Create the container ---
+        this.instructionsContainer = this.add.container(panelX, panelY);
+        this.instructionsContainer.setScrollFactor(0);
+        this.instructionsContainer.setDepth(1000); // Increased depth significantly
+        console.log(`Instructions Container created at (${this.instructionsContainer.x.toFixed(0)}, ${this.instructionsContainer.y.toFixed(0)}), Depth: ${this.instructionsContainer.depth}, Alpha: ${this.instructionsContainer.alpha}, Visible: ${this.instructionsContainer.visible}`);
+
+        // --- Create the background panel graphics ---
+        const panelGraphics = this.add.graphics();
+        panelGraphics.fillStyle(0x1A1A1A, 0.9); // Dark grey, slightly more opaque
+        panelGraphics.fillRoundedRect(0, 0, panelWidth, panelHeight, 10); // Rounded corners
+        panelGraphics.lineStyle(3, 0xA0522D, 1); // Sienna border, slightly thicker
+        panelGraphics.strokeRoundedRect(0, 0, panelWidth, panelHeight, 10);
+        this.instructionsContainer.add(panelGraphics);
+        console.log(`Panel Graphics added to container.`);
+
+        // Create the actual text object inside the container
+        const instructionsText = this.add.text(padding, padding, instructionsTextContent, textStyle);
+        this.instructionsContainer.add(instructionsText);
+        console.log(`Instructions Text added to container. Content: "${instructionsText.text.substring(0, 30)}..."`);
+
+        // --- Create the dismiss button ('X') ---
+        const dismissButton = this.add.text(panelWidth - padding, padding * 0.75, '✖', { // Using '✖' symbol, adjusted position slightly
+            fontSize: '22px', // Slightly larger 'X'
+            fill: '#FF6B00', // Martian Orange
+            fontFamily: 'Arial, sans-serif', // Simple font for 'X'
+            stroke: '#000000',
+            strokeThickness: 2
+        });
+        dismissButton.setOrigin(1, 0); // Top-right origin
+        dismissButton.setInteractive({ useHandCursor: true });
+        this.instructionsContainer.add(dismissButton);
+        console.log(`Dismiss Button added to container at relative (${dismissButton.x.toFixed(0)}, ${dismissButton.y.toFixed(0)})`);
+
+        // Dismiss action
+        dismissButton.on('pointerdown', () => {
+            this.dismissInstructions();
+        });
+
+        // Hover effect for dismiss button
+        dismissButton.on('pointerover', () => dismissButton.setFill('#FFFFFF')); // White on hover
+        dismissButton.on('pointerout', () => dismissButton.setFill('#FF6B00')); // Back to orange
+
+        // --- Pause the physics engine ---
+        console.log(`UI elements added. Proceeding to pause physics.`);
+        this.physics.pause();
+        console.log(`createInstructionsUI function completed.`); // Added final log
+        // Optional: Could add flags here to stop player/enemy update loops if physics pause isn't enough
+    }
+
+    dismissInstructions() {
+        if (this.instructionsContainer || this.instructionsOverlay) {
+            console.log("Dismissing instructions and resuming GameScreen.");
+
+            // Fade out overlay and container simultaneously
+            const targetsToFade = [];
+            if (this.instructionsContainer) targetsToFade.push(this.instructionsContainer);
+            if (this.instructionsOverlay) targetsToFade.push(this.instructionsOverlay);
+
+            if (targetsToFade.length > 0) {
+                this.tweens.add({
+                    targets: targetsToFade,
+                    alpha: 0,
+                    duration: 200,
+                    ease: 'Power1',
+                    onComplete: () => {
+                        if (this.instructionsContainer) {
+                            this.instructionsContainer.destroy();
+                            this.instructionsContainer = null;
+                        }
+                        if (this.instructionsOverlay) {
+                            this.instructionsOverlay.destroy();
+                            this.instructionsOverlay = null;
+                        }
+                        // Resume physics only after fadeout and destruction
+                        if (this.physics.world.isPaused) {
+                            console.log("Resuming physics.");
+                            this.physics.resume();
+                        } else {
+                            console.log("Physics was not paused when trying to resume.");
+                        }
+                        // Optional: Reset any manual pause flags for entities here
+                    }
+                });
+            } else {
+                 // If somehow only one exists, destroy immediately and resume
+                 if (this.instructionsContainer) this.instructionsContainer.destroy();
+                 if (this.instructionsOverlay) this.instructionsOverlay.destroy();
+                 this.instructionsContainer = null;
+                 this.instructionsOverlay = null;
+                 // Resume physics
+                 if (this.physics.world.isPaused) {
+                     console.log("Resuming physics (no fade).");
+                     this.physics.resume();
+                 } else {
+                     console.log("Physics was not paused when trying to resume (no fade).");
+                 }
+            }
+        } else {
+             // No need for safety check here as we aren't pausing the scene anymore
+        }
+    }
+    // --- End Instructions UI ---
+
 
     // --- NEW: Continuous Screen Shake Methods ---
     startContinuousShake(intensity = 0.005, duration = Infinity) {

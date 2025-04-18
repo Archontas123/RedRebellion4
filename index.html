@@ -123,27 +123,6 @@
             /* Removed background-color, border-radius, box-shadow */
         }
 
-        #clear-plasma-button {
-            position: absolute;
-            top: 75px; /* Position below plasma counter */
-            left: 10px;
-            padding: 5px 10px;
-            background-color: #ff4444; /* Reddish color */
-            color: white;
-            border: 1px solid #ff8888;
-            border-radius: 4px;
-            font-family: 'Arial', sans-serif;
-            font-size: 14px;
-            cursor: pointer;
-            pointer-events: auto; /* Make button clickable */
-            display: none; /* Hide by default */
-            z-index: 11; /* Above UI layer */
-            box-shadow: 0 0 5px #ff4444;
-        }
-        #clear-plasma-button:hover {
-            background-color: #dd2222;
-        }
-
         #tile-coords-display {
             position: absolute;
             top: 210px; /* mini-map top (20px) + height (180px) + 10px spacing */
@@ -196,35 +175,6 @@
         .powerup-icon.fire_rate { background-color: #ffff00; box-shadow: 0 0 3px #ffff00; } /* Yellow for fire rate */
         .powerup-icon.health { background-color: #44ff44; box-shadow: 0 0 3px #44ff44; } /* Green for health */
 
-        #dust-storm-overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            /* Removed background-color */
-            /* Use multiple gradients to simulate specks */
-            background-image:
-                radial-gradient(rgba(180, 130, 80, 0.3) 1px, transparent 1px), /* Lighter specks */
-                radial-gradient(rgba(120, 80, 40, 0.2) 1px, transparent 1px); /* Darker specks */
-            background-size: 30px 30px, 50px 50px; /* Control density/size */
-            background-position: 0 0, 15px 15px; /* Offset the patterns */
-            pointer-events: none; /* Allow clicks to pass through */
-            z-index: 9; /* Increased z-index, still below main UI (10) */
-            animation: dustScroll 10s linear infinite; /* Apply animation */
-            opacity: 0.7; /* Overall opacity for the effect */
-        }
-
-        @keyframes dustScroll {
-            0% {
-                background-position: 0 0, 15px 15px;
-            }
-            100% {
-                /* Scroll horizontally - adjust speed by changing the X value */
-                background-position: -500px 0, -485px 15px;
-            }
-        }
-
         #wave-counter-display {
             position: absolute;
             top: 15px; /* Position near the top */
@@ -274,6 +224,50 @@
             pointer-events: none; /* Prevent interaction */
         }
 
+        /* Removed #lives-display CSS */
+
+        #game-lives-counter {
+            position: absolute;
+            top: 10px; /* Align vertically with health bar */
+            left: 220px; /* Position to the right of the health bar (10px left + 200px width + 10px spacing) */
+            color: #ff4444; /* Red color for lives */
+            font-size: 24px;
+            font-family: 'Arial', sans-serif;
+            text-shadow: 1px 1px 2px #000000; /* Simple shadow */
+            display: none; /* Hide by default */
+            pointer-events: none; /* Allow clicks through */
+            z-index: 10;
+        }
+
+        #countdown-display {
+            position: absolute;
+            top: 50%; /* Center vertically */
+            left: 50%; /* Center horizontally */
+            transform: translate(-50%, -50%); /* Precise centering */
+            color: #FFD700; /* Gold/Yellow color */
+            font-size: 64px; /* Large font */
+            font-weight: bold;
+            font-family: 'Arial', sans-serif;
+            text-shadow: 3px 3px 6px #000000; /* Black shadow */
+            display: none; /* Hide by default */
+            pointer-events: none; /* Allow clicks through */
+            z-index: 11; /* Above other UI */
+            text-align: center;
+        }
+
+        #score-display {
+            position: absolute;
+            top: 10px; /* Align vertically with health bar and lives */
+            left: 320px; /* Position to the right of the lives counter */
+            color: #ffffff; /* White color */
+            font-size: 24px;
+            font-family: 'Arial', sans-serif;
+            text-shadow: 1px 1px 2px #000000; /* Simple shadow */
+            display: none; /* Hide by default */
+            pointer-events: none; /* Allow clicks through */
+            z-index: 10;
+        }
+
     </style>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
     <script defer type="module" src="src/main.js"></script>
@@ -283,7 +277,6 @@
         <!-- Phaser canvas will be added here by the framework -->
     </div>
     <div id="ui-layer">
-        <div id="dust-storm-overlay"></div> <!-- Add the overlay div here -->
         <div id="health-bar-container">
             <div id="health-bar-fill"></div>
         </div>
@@ -297,12 +290,15 @@
             <img id="plasma-icon" src="assets/plasma.png" alt="Plasma">
             <span id="plasma-count">0</span> <!-- Separate span for the count -->
         </div>
-        <button id="clear-plasma-button">Clear Plasma</button> <!-- Add the button -->
+        <div id="game-lives-counter">Lives: 3</div> <!-- NEW In-Game Lives Counter -->
+        <div id="score-display">Score: 0</div> <!-- NEW Score Display -->
+        <!-- Removed Game Over Lives Display element -->
         <div id="tile-coords-display">Tile: 0, 0</div> <!-- Add coordinate display element -->
-        <div id="wave-counter-display">Wave: 0</div> <!-- Add Wave Counter element -->
-        <div id="boss-health-bar-container"> <!-- Boss Health Bar -->
-             <div id="boss-health-bar-fill"></div>
-             <div id="boss-health-bar-marker"></div> <!-- Added Marker -->
+            <div id="wave-counter-display">Wave: 0</div> <!-- Add Wave Counter element -->
+            <div id="countdown-display">Next Wave: 5</div> <!-- Add Countdown element -->
+            <div id="boss-health-bar-container"> <!-- Boss Health Bar -->
+                 <div id="boss-health-bar-fill"></div>
+                 <div id="boss-health-bar-marker"></div> <!-- Added Marker -->
         </div>
         <div id="powerup-counters">
             <!-- Speed Boost Counter -->

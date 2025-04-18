@@ -1,6 +1,7 @@
 import StartScreen from './scenes/StartScene.js';
 import GameScreen from './scenes/GameScreen.js';
-import PowerupSelectionScreen from './scenes/PowerupSelectionScreen.js'; // Import the new scene
+import PowerupSelectionScreen from './scenes/PowerupSelectionScreen.js';
+import GameOverScene from './scenes/GameOverScene.js'; // Import the Game Over scene
 
 const config = {
     type: Phaser.AUTO, // Use WebGL if available, otherwise Canvas
@@ -23,7 +24,7 @@ const config = {
         expandParent: true
     },
     // Add all scenes to the config so they are known by the Scene Manager
-    scene: [StartScreen, GameScreen, PowerupSelectionScreen]
+    scene: [StartScreen, GameScreen, PowerupSelectionScreen, GameOverScene] // Add GameOverScene here
 };
 
 const game = new Phaser.Game(config);

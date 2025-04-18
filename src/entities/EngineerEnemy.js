@@ -1,8 +1,7 @@
 import { Enemy } from './Enemy.js';
 import { DroneEnemy } from './DroneEnemy.js'; // Import the DroneEnemy
 import { TurretEnemy } from './TurretEnemy.js'; // Import the TurretEnemy
-import { DynamiteProjectile } from './DynamiteProjectile.js'; // Import the new DynamiteProjectile
-
+import { Projectile } from './Projectile.js'; // Import the Projectile class
 export class EngineerEnemy extends Enemy {
     constructor(x, y, options = {}) {
         const engineerOptions = {
@@ -51,28 +50,27 @@ export class EngineerEnemy extends Enemy {
         this.turretSpawnCooldown = 8.0; // Time between potential turret spawns (seconds) - Reduced
         this.turretSpawnCooldownTimer = Math.random() * this.turretSpawnCooldown; // Start with random cooldown
         this.turretSpawnChance = 0.75; // 75% chance to spawn a turret after tunneling - Increased
-        // Drone spawning properties
-        this.hasSpawnedDrones = false;
-
-        // --- Dynamite Tossing Properties ---
-        this.dynamiteCooldown = 4.0; // Time between dynamite throws (seconds) - Reduced
-        this.dynamiteCooldownTimer = Math.random() * this.dynamiteCooldown; // Start with random cooldown
-        this.dynamiteThrowRangeMin = 200; // Minimum distance to throw
-        this.dynamiteThrowRangeMax = 500; // Maximum distance to throw
-        this.dynamiteFuseTime = 2.0; // Seconds until dynamite explodes - Reduced
-        this.dynamiteDamage = 450; // Damage on explosion - Increased
-        this.dynamiteExplosionRadius = 150; // Radius of explosion - Increased
-        this.dynamiteThrowSpeed = 450; // Initial speed of the thrown dynamite
-
-        // Ensure initial state is set correctly
-        if (!this.state) {
-            this.setState('idle');
-        }
-        this.collidable = true;
         this.visible = true;
+        this.hasSpawnedDrones = false; // Flag to prevent multiple spawns
+
+        // Machine Gun properties
+        this.shootRange = 700; // Range of the machine guns
+        this.fireRate = 5; // Shots per second (per gun, so 10 total)
+        this.fireCooldown = 1.0 / this.fireRate; // Time between shots for one gun
+        this.fireCooldownTimer = 0; // Timer for the next shot
+        this.projectileSpeed = 500;
+        this.projectileDamage = 2; // Reduced from 5
+        this.gunOffset = 35; // Distance from center for each gun
+        this.nextGun = 0; // 0 for left, 1 for right
+        // Reload properties
+        this.clipSize = 30;
+        this.ammoCount = this.clipSize;
+        this.reloadTime = 4.0; // seconds (Increased from 2.0)
+        this.reloadTimer = 0;
+        this.isReloading = false;
 
         console.log(`EngineerEnemy created at (${x}, ${y})`);
-        // console.log(`Tunneling Params: Range=${this.tunnelRange}, Cooldown=${this.tunnelCooldown}, Down=${this.tunnelDownDuration}, Under=${this.tunnelDuration}, Up=${this.tunnelUpDuration}`); // Old log
+        // console.log(`Tunneling Params: Range=${this.tunnelRange}, Cooldown=${this.tunnelCooldown}, Down=${this.tunnelDownDuration}, Under=${this.tunnelDuration}, Up=${this.tunnelUpDuration}`); // Less verbose logging
     }
 
     update(deltaTime, worldContext) {
@@ -87,9 +85,22 @@ export class EngineerEnemy extends Enemy {
             this.turretSpawnCooldownTimer -= deltaTime;
             if (this.turretSpawnCooldownTimer < 0) this.turretSpawnCooldownTimer = 0;
         }
-        if (this.dynamiteCooldownTimer > 0) { // Update dynamite cooldown
-            this.dynamiteCooldownTimer -= deltaTime;
-            if (this.dynamiteCooldownTimer < 0) this.dynamiteCooldownTimer = 0;
+
+        // Update fire cooldown timer
+        if (this.fireCooldownTimer > 0) {
+            this.fireCooldownTimer -= deltaTime;
+            if (this.fireCooldownTimer < 0) this.fireCooldownTimer = 0;
+        }
+
+        // Update reload timer
+        if (this.isReloading) {
+            this.reloadTimer -= deltaTime;
+            if (this.reloadTimer <= 0) {
+                this.isReloading = false;
+                this.ammoCount = this.clipSize;
+                this.reloadTimer = 0;
+                console.log(`Engineer ${this.id} finished reloading.`);
+            }
         }
 
         // Removed shake reset
@@ -144,22 +155,39 @@ export class EngineerEnemy extends Enemy {
         }
         // --- End Tunneling States ---
 
-        // If not tunneling, ensure scale is 1 and no shake
-        this.visible = true;
-        this.collidable = true;
+        // If not tunneling, check for shooting opportunity (and not reloading)
+        if (this.state !== 'tunneling_underground' && this.state !== 'stunned' && this.state !== 'dead' && this.targetPlayer && !this.isReloading) {
+            const dx = this.targetPlayer.x - this.x;
+            const dy = this.targetPlayer.y - this.y;
+            const distanceSq = dx * dx + dy * dy;
 
-        // Run standard update logic (includes pursuePlayer which might trigger dynamite)
+            // Check range, cooldown, and ammo
+            if (distanceSq <= this.shootRange * this.shootRange && this.fireCooldownTimer <= 0 && this.ammoCount > 0) {
+                this.shoot(dx, dy, distanceSq); // Pass direction info
+                this.fireCooldownTimer = this.fireCooldown; // Reset fire cooldown
+            }
+        }
+
+        // Reset visual state if somehow exited tunneling abnormally
+        if (this.state !== 'tunneling_underground') {
+             this.visible = true;
+             this.collidable = true;
+        }
+
+
+        // Run standard update logic (handles movement, separation, etc.)
         super.update(deltaTime, worldContext);
     }
 
-    // PursuePlayer and StartTunneling remain the same as the previous version
+    // PursuePlayer modified to prevent tunneling while reloading
     pursuePlayer(deltaTime) {
-        const canAct = this.state !== 'stunned' && this.state !== 'dead' &&
-                       this.state !== 'tunneling_underground';
+        const canTunnel = this.state !== 'stunned' && this.state !== 'dead' &&
+                          this.state !== 'tunneling_underground' &&
+                          !this.isReloading; // Cannot tunnel while reloading
 
-        if (!this.targetPlayer || !canAct) {
+        if (!this.targetPlayer || !canTunnel) {
              if (this.state === 'pursuing') {
-                 super.pursuePlayer(deltaTime); // Still move if pursuing but no target/can't act
+                 super.pursuePlayer(deltaTime);
              }
             return;
         }
@@ -168,36 +196,25 @@ export class EngineerEnemy extends Enemy {
         const dy = this.targetPlayer.y - this.y;
         const distanceSq = dx * dx + dy * dy;
         const tunnelRangeSq = this.tunnelRange * this.tunnelRange;
-        const dynamiteRangeMinSq = this.dynamiteThrowRangeMin * this.dynamiteThrowRangeMin;
-        const dynamiteRangeMaxSq = this.dynamiteThrowRangeMax * this.dynamiteThrowRangeMax;
 
-        // --- Attack Priority ---
-        // 1. Tunnel if close enough and cooldown ready
-        if (distanceSq <= tunnelRangeSq && this.tunnelCooldownTimer <= 0) {
+        if (canTunnel && distanceSq <= tunnelRangeSq && this.tunnelCooldownTimer <= 0) {
             this.startTunneling();
-            return; // Don't do other actions if tunneling
+            return;
         }
 
-        // 2. Throw Dynamite if in range and cooldown ready
-        if (distanceSq >= dynamiteRangeMinSq && distanceSq <= dynamiteRangeMaxSq && this.dynamiteCooldownTimer <= 0) {
-            this.throwDynamite();
-            this.dynamiteCooldownTimer = this.dynamiteCooldown; // Reset cooldown *after* throwing
-            // Don't return, still pursue after throwing
-        }
-
-        // 3. Default: Move towards player if not doing other actions
         super.pursuePlayer(deltaTime);
     }
 
     startTunneling() {
-        // ... (existing tunneling logic remains the same)
         const dx = this.targetPlayer ? this.targetPlayer.x - this.x : 0;
         const dy = this.targetPlayer ? this.targetPlayer.y - this.y : 0;
         const dist = Math.sqrt(dx * dx + dy * dy);
         console.log(`Engineer ${this.id} initiating tunnel. Player distance: ${dist.toFixed(0)}`);
 
+        // --- Start Tunneling ---
         console.log(`Engineer ${this.id} starting tunnel from (${this.x.toFixed(0)}, ${this.y.toFixed(0)})`);
 
+        // Create explosion effect on disappear
         if (this.scene && typeof this.scene.createTunnelExplosion === 'function') {
             this.scene.createTunnelExplosion(this.x, this.y);
             if (typeof this.scene.createShockwaveEffect === 'function') {
@@ -205,17 +222,19 @@ export class EngineerEnemy extends Enemy {
             }
         }
 
+        // Go underground
         this.setState('tunneling_underground');
-        this.startX = this.x;
+        this.startX = this.x; // Store starting position for trail
         this.startY = this.y;
-        this.tunnelTrailTimer = 0;
-        this.tunnelPhaseTimer = this.tunnelDuration;
+        this.tunnelTrailTimer = 0; // Reset trail timer
+        this.tunnelPhaseTimer = this.tunnelDuration; // Set timer for underground phase
         this.tunnelCooldownTimer = this.tunnelCooldown;
-        this.visible = false;
-        this.collidable = false;
-        this.velocityX = 0;
+        this.visible = false; // Become invisible *after* explosion starts
+        this.collidable = false; // Instantly non-collidable
+        this.velocityX = 0; // Stop movement
         this.velocityY = 0;
 
+        // Find target position
         let targetPos = null;
         if (this.scene && this.scene.worldManager && typeof this.scene.worldManager.findRandomValidPositionNear === 'function') {
             targetPos = this.scene.worldManager.findRandomValidPositionNear(
@@ -234,160 +253,174 @@ export class EngineerEnemy extends Enemy {
             this.targetTunnelX = this.x + Math.cos(fallbackAngle) * this.tunnelMinDistance;
             this.targetTunnelY = this.y + Math.sin(fallbackAngle) * this.tunnelMinDistance;
         }
+
+        // Removed dust effect call here, using explosion effect instead
     }
 
-    // --- New Method: Throw Dynamite ---
-    throwDynamite() {
-        if (!this.targetPlayer || !this.scene || !this.scene.addProjectile) {
-            console.warn(`Engineer ${this.id}: Cannot throw dynamite - missing target, scene, or addProjectile method.`);
+    shoot(targetDx, targetDy, targetDistanceSq) {
+        // Ensure scene, method, and ammo exist
+        if (!this.targetPlayer || !this.scene || typeof this.scene.createProjectile !== 'function' || this.ammoCount <= 0 || this.isReloading) {
+            console.warn(`Engineer ${this.id}: Cannot shoot - missing target/scene/method, out of ammo, or reloading.`);
             return;
         }
 
-        console.log(`Engineer ${this.id} throwing dynamite towards player.`);
+        // Calculate normalized direction vector
+        const distance = Math.sqrt(targetDistanceSq);
+        const dirX = distance > 0 ? targetDx / distance : 1; // Default to right if distance is 0
+        const dirY = distance > 0 ? targetDy / distance : 0;
+        const direction = { x: dirX, y: dirY }; // Pass direction as an object
 
-        const dx = this.targetPlayer.x - this.x;
-        const dy = this.targetPlayer.y - this.y;
-        const angle = Math.atan2(dy, dx);
+        // Calculate perpendicular vector for gun offset
+        const perpX = -dirY;
+        const perpY = dirX;
 
-        // Predict player movement slightly (optional, can be simple for now)
-        // const predictTime = Math.sqrt(dx*dx + dy*dy) / this.dynamiteThrowSpeed; // Rough time to target
-        // const targetX = this.targetPlayer.x + this.targetPlayer.velocityX * predictTime;
-        // const targetY = this.targetPlayer.y + this.targetPlayer.velocityY * predictTime;
-        // const finalDx = targetX - this.x;
-        // const finalDy = targetY - this.y;
-        // const finalAngle = Math.atan2(finalDy, finalDx);
+        // Determine which gun offset to use
+        const offsetX = perpX * this.gunOffset * (this.nextGun === 0 ? -1 : 1);
+        const offsetY = perpY * this.gunOffset * (this.nextGun === 0 ? -1 : 1);
 
-        const dynamite = new DynamiteProjectile(this.x, this.y, {
-            scene: this.scene,
-            velocityX: Math.cos(angle) * this.dynamiteThrowSpeed,
-            velocityY: Math.sin(angle) * this.dynamiteThrowSpeed,
-            fuseTime: this.dynamiteFuseTime,
-            damage: this.dynamiteDamage,
-            explosionRadius: this.dynamiteExplosionRadius,
-            owner: this // Identify the owner to prevent self-damage if needed
-        });
+        // Calculate spawn position
+        const spawnX = this.x + offsetX;
+        const spawnY = this.y + offsetY;
 
-        this.scene.addProjectile(dynamite); // Use scene method to handle adding projectiles
+        // Call the scene's method to create the projectile (handles logic and visual)
+        this.scene.createProjectile(
+            spawnX,
+            spawnY,
+            direction, // Pass direction object
+            this.projectileSpeed,
+            this.projectileDamage,
+            this.id, // Owner ID
+            'enemy_projectile' // Type
+            // Note: GameScreen.createProjectile doesn't currently use color, size, piercing, duration from here
+        );
 
-        // Optional: Add a visual cue like a throwing animation or sound effect here
-        // this.scene.playSound('dynamite_throw');
+        this.ammoCount--; // Decrement ammo
+
+        // Switch to the other gun for the next shot
+        this.nextGun = 1 - this.nextGun;
+
+        // Check if out of ammo and start reload
+        if (this.ammoCount <= 0) {
+            this.isReloading = true;
+            this.reloadTimer = this.reloadTime;
+            console.log(`Engineer ${this.id} started reloading (${this.reloadTime}s).`);
+        }
     }
 
     // HandleCollision remains the same
     handleCollision(otherEntity) {
-        // ... (existing collision logic remains the same)
+        // Only process collisions if collidable
         if (!this.collidable) return;
+
+        // Prevent the Engineer from dealing melee damage by NOT calling super if it's the player.
+        // Let the parent handle other collisions (like projectiles).
         if (otherEntity.type !== 'player') {
             super.handleCollision(otherEntity);
         }
+        // If otherEntity IS the player, do nothing here. The player's collision logic will handle hitting the enemy.
     }
 // Override takeDamage to check for drone spawning condition
-    takeDamage(amount) {
-        // ... (existing takeDamage logic remains the same)
-       const oldHealth = this.health;
-       super.takeDamage(amount);
+takeDamage(amount) {
+   const oldHealth = this.health;
+   super.takeDamage(amount); // Apply damage first
 
-       if (this.state !== 'dead' && !this.hasSpawnedDrones && this.health <= this.maxHealth / 2) {
-           this.spawnDrones();
-           this.hasSpawnedDrones = true;
-       }
-    }
+   // Check if health dropped below 50% and drones haven't spawned yet
+   if (this.state !== 'dead' && !this.hasSpawnedDrones && this.health <= this.maxHealth / 2) {
+       this.spawnDrones();
+       this.hasSpawnedDrones = true; // Set flag to prevent respawning
+   }
+}
 
-    spawnDrones() {
-        // ... (existing spawnDrones logic remains the same)
-       console.log(`Engineer ${this.id} health below 50% (${this.health}/${this.maxHealth}), spawning drones!`);
-       const numberOfDrones = 4 + Math.floor(Math.random() * 3);
+spawnDrones() {
+   console.log(`Engineer ${this.id} health below 50% (${this.health}/${this.maxHealth}), spawning drones!`);
+   const numberOfDrones = 4 + Math.floor(Math.random() * 3); // Spawn 4-6 drones
 
-       if (!this.scene || !Array.isArray(this.scene.enemies)) {
-           console.error(`Engineer ${this.id}: Cannot spawn drones - scene or scene.enemies array not available.`);
-           return;
-       }
+   // Check if the scene and the enemies array exist
+   if (!this.scene || !Array.isArray(this.scene.enemies)) {
+       console.error(`Engineer ${this.id}: Cannot spawn drones - scene or scene.enemies array not available.`);
+       return;
+   }
 
-       for (let i = 0; i < numberOfDrones; i++) {
-           const angle = (i / numberOfDrones) * Math.PI * 2 + (Math.random() * 0.5 - 0.25);
-           const spawnDist = 50 + Math.random() * 20;
-           const spawnX = this.x + Math.cos(angle) * spawnDist;
-           const spawnY = this.y + Math.sin(angle) * spawnDist;
+   for (let i = 0; i < numberOfDrones; i++) {
+       // Spawn drones in a small radius around the engineer
+       const angle = (i / numberOfDrones) * Math.PI * 2 + (Math.random() * 0.5 - 0.25); // Spread them out slightly randomly
+       const spawnDist = 50 + Math.random() * 20; // Spawn 50-70 pixels away
+       const spawnX = this.x + Math.cos(angle) * spawnDist;
+       const spawnY = this.y + Math.sin(angle) * spawnDist;
 
-           const newDrone = new DroneEnemy(spawnX, spawnY, { scene: this.scene });
-           this.scene.enemies.push(newDrone); // Assuming direct addition is okay
-           console.log(` -> Spawned Drone ${newDrone.id} at (${spawnX.toFixed(0)}, ${spawnY.toFixed(0)})`);
-       }
-    }
+       const newDrone = new DroneEnemy(spawnX, spawnY, { scene: this.scene });
+       // Directly add the drone to the scene's enemy array
+       this.scene.enemies.push(newDrone);
+       console.log(` -> Spawned Drone ${newDrone.id} at (${spawnX.toFixed(0)}, ${spawnY.toFixed(0)})`);
+   }
+}
 
 // Method to spawn multiple turrets
-    spawnTurrets() {
-        // ... (existing spawnTurrets logic remains the same)
-        const numTurrets = 3 + Math.floor(Math.random() * 3);
-        console.log(`Engineer ${this.id} attempting to spawn ${numTurrets} turrets.`);
+spawnTurrets() {
+    const numTurrets = 3 + Math.floor(Math.random() * 3); // Spawn 3-5 turrets
+    console.log(`Engineer ${this.id} attempting to spawn ${numTurrets} turrets.`);
 
-        if (!this.scene || !Array.isArray(this.scene.enemies)) {
-            console.error(`Engineer ${this.id}: Cannot spawn turrets - scene or scene.enemies array not available.`);
-            return;
-        }
-
-        const baseSpawnDist = 150;
-        const randomDistOffset = 100;
-
-        for (let i = 0; i < numTurrets; i++) {
-            const angle = (i / numTurrets) * Math.PI * 2 + (Math.random() * 0.6 - 0.3);
-            const spawnDist = baseSpawnDist + Math.random() * randomDistOffset;
-
-            const spawnX = this.x + Math.cos(angle) * spawnDist;
-            const spawnY = this.y + Math.sin(angle) * spawnDist;
-
-            // 1. Create the visual representation (Phaser GameObject)
-            // TODO: Replace 'turret_sprite' with the actual texture key for the turret
-            const turretSprite = this.scene.add.sprite(spawnX, spawnY, 'turret_sprite');
-            // Optionally set depth, scale, etc. for the sprite here
-            // turretSprite.setDepth(5);
-
-            // 2. Create the logic object, passing the GameObject reference
-            const newTurret = new TurretEnemy(spawnX, spawnY, {
-                scene: this.scene,
-                gameObject: turretSprite // Pass the sprite reference
-            });
-
-            // 3. Add the logic object to the enemy manager/list
-            this.scene.enemies.push(newTurret);
-            console.log(` -> Spawned Turret ${newTurret.id} at (${spawnX.toFixed(0)}, ${spawnY.toFixed(0)})`);
-        }
+    // Check if the scene and the enemies array exist
+    if (!this.scene || !Array.isArray(this.scene.enemies)) {
+        console.error(`Engineer ${this.id}: Cannot spawn turrets - scene or scene.enemies array not available.`);
+        return;
     }
+
+    const baseSpawnDist = 150; // Base distance from engineer
+    const randomDistOffset = 100; // Random additional distance
+
+    for (let i = 0; i < numTurrets; i++) {
+        // Spread them out in a circle, with some randomness
+        const angle = (i / numTurrets) * Math.PI * 2 + (Math.random() * 0.6 - 0.3); // Add +/- 0.3 radians randomness
+        const spawnDist = baseSpawnDist + Math.random() * randomDistOffset; // Spawn 150-250 pixels away
+
+        const spawnX = this.x + Math.cos(angle) * spawnDist;
+        const spawnY = this.y + Math.sin(angle) * spawnDist;
+
+        // TODO: Optionally add a check here to ensure spawnX, spawnY is a valid location using worldManager
+
+        const newTurret = new TurretEnemy(spawnX, spawnY, { scene: this.scene });
+        // Directly add the turret to the scene's enemy array
+        this.scene.enemies.push(newTurret);
+        console.log(` -> Spawned Turret ${newTurret.id} at (${spawnX.toFixed(0)}, ${spawnY.toFixed(0)})`);
+    }
+}
  
 // OnDeath remains the same
-    onDeath() {
-        // ... (existing onDeath logic remains the same)
-        if (this.state === 'tunneling_underground') {
-            this.visible = true;
-            this.collidable = true;
-            console.log(`Engineer ${this.id} died while tunneling underground. Resetting state.`);
-        }
-
-        super.onDeath();
-        console.log(`EngineerEnemy ${this.id} has been defeated!`);
-
-        if (this.scene && typeof this.scene.createExplosion === 'function') {
-            this.scene.createExplosion(this.x, this.y, this.size * 1.5, { color: this.color });
-        }
-
-        const dropChance = 0.50;
-         if (Math.random() < dropChance) {
-             if (this.scene && this.scene.powerupManager) {
-                 console.log(`EngineerEnemy ${this.id} dropping powerup at (${this.x.toFixed(0)}, ${this.y.toFixed(0)})`);
-                 this.scene.powerupManager.spawnPowerup(this.x, this.y);
-             } else {
-                 console.warn(`EngineerEnemy ${this.id}: Cannot drop powerup - scene or powerupManager not found.`);
-             }
-         }
+onDeath() {
+    // Reset visibility/collision if died while tunneling
+    if (this.state === 'tunneling_underground') {
+        this.visible = true;
+        this.collidable = true;
+        console.log(`Engineer ${this.id} died while tunneling underground. Resetting state.`);
     }
+
+    super.onDeath();
+    console.log(`EngineerEnemy ${this.id} has been defeated!`);
+
+    if (this.scene && typeof this.scene.createExplosion === 'function') {
+        this.scene.createExplosion(this.x, this.y, this.size * 1.5, { color: this.color });
+    }
+
+    const dropChance = 0.50;
+     if (Math.random() < dropChance) {
+         if (this.scene && this.scene.powerupManager) {
+             console.log(`EngineerEnemy ${this.id} dropping powerup at (${this.x.toFixed(0)}, ${this.y.toFixed(0)})`);
+             this.scene.powerupManager.spawnPowerup(this.x, this.y);
+         } else {
+             console.warn(`EngineerEnemy ${this.id}: Cannot drop powerup - scene or powerupManager not found.`);
+         }
+     }
+}
 
     // SetState needs to reset visual effects when exiting tunneling states
     setState(newState) {
-        // ... (existing setState logic remains the same)
         const oldState = this.state;
         if (oldState !== newState) {
+            // console.log(`Engineer ${this.id} changing state from ${oldState} to ${newState}`); // Re-commented original log
             this.state = newState;
 
+            // Reset visual state if exiting tunneling state
             const exitingTunnel = (oldState === 'tunneling_underground');
             const enteringNonTunnel = (newState !== 'tunneling_underground');
 
@@ -405,7 +438,7 @@ export class EngineerEnemy extends Enemy {
      * @param {number} duration - The duration the stun would normally last.
      */
     stun(duration) {
-        // ... (existing stun logic remains the same)
         // Do nothing, Engineer cannot be stunned.
+        // console.log(`Engineer ${this.id} ignored stun attempt.`); // Optional: for debugging
     }
 }

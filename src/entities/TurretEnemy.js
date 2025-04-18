@@ -29,8 +29,6 @@ export class TurretEnemy extends Enemy {
 
         super(x, y, turretOptions);
 
-        // Store reference to the Phaser GameObject (e.g., Sprite)
-        this.gameObject = options.gameObject || null;
         // Turret specific properties
         this.attackRange = turretOptions.attackRange;
         this.attackCooldown = turretOptions.attackCooldown;
@@ -181,13 +179,7 @@ export class TurretEnemy extends Enemy {
         super.onDeath(); // Sets state to 'dead'
         this.hideDestructionIndicator(); // Clean up indicator graphics
         // TODO: Add specific death visual effect (explosion, etc.) before destroying
-        // Destroy the associated Phaser GameObject, if it exists
-        if (this.gameObject) {
-            this.gameObject.destroy();
-            this.gameObject = null; // Clear the reference
-        } else {
-            console.warn(`TurretEnemy ${this.id} onDeath: No gameObject reference found to destroy.`);
-        }
+        // The actual removal should be handled by the scene/manager checking the 'dead' state.
     }
 
     // Remove methods related to movement and complex AI inherited from Enemy
