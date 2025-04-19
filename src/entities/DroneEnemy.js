@@ -13,6 +13,8 @@ export class DroneEnemy extends Enemy {
             separationRadius: 30, // Less separation needed for smaller drones
             separationForce: 90,
             type: 'drone_enemy', // Specific type identifier
+            spritePath: 'assets/drone.png', // Added sprite path
+            // color: '#FFD700', // Color determined by sprite
             ...options, // Allow specific overrides from spawner
         };
 
@@ -83,50 +85,5 @@ export class DroneEnemy extends Enemy {
         // The EnemyManager should handle the actual removal of the 'dead' entity from the game loop.
     }
 
-    // Override draw for a distinct drone appearance
-    draw(ctx, camera) {
-        if (this.state === 'dead') return; // Don't draw if dead
-
-        const screenPos = camera.worldToScreen(this.x, this.y);
-        const scale = camera.zoom;
-        // Use collision bounds for size calculation
-        const size = Math.max(this.collisionBounds.width, this.collisionBounds.height) * scale * 0.6; // Make visual slightly smaller than bounds
-
-        ctx.save();
-        ctx.translate(screenPos.x, screenPos.y);
-
-        // Simple triangle shape for drone
-        ctx.beginPath();
-        ctx.moveTo(0, -size * 0.8); // Top point sharper
-        ctx.lineTo(-size * 0.6, size * 0.5); // Bottom left wider
-        ctx.lineTo(size * 0.6, size * 0.5); // Bottom right wider
-        ctx.closePath();
-
-        // Hit flash effect
-        if (this.isFlashing) {
-            ctx.fillStyle = 'white';
-            ctx.fill();
-        } else {
-            ctx.fillStyle = this.color;
-            ctx.fill();
-            ctx.strokeStyle = '#A08000'; // Darker outline
-            ctx.lineWidth = Math.max(1, 1 * scale); // Ensure minimum line width
-            ctx.stroke();
-        }
-
-        // Stun effect (inherited from Entity/Enemy)
-        if (this.isStunned) {
-            this.drawStunEffect(ctx, size * 1.5); // Make stun effect slightly larger relative to drone
-        }
-
-        ctx.restore();
-
-        // Draw health bar (inherited from Entity) - maybe make smaller?
-        this.drawHealthBar(ctx, camera, 0.8); // Pass scale factor for health bar
-
-        // Draw debug info if enabled (inherited from Entity)
-        if (this.debug) {
-            this.drawDebugInfo(ctx, camera);
-        }
-    }
+    // Removed custom draw method - rely on parent Entity draw
 }

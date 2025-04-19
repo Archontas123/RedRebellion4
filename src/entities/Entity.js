@@ -37,7 +37,11 @@ class Entity {
         this.collisionBounds = options.collisionBounds || { x: 0, y: 0, width: 10, height: 10 };
 
         // Sprite and Animation properties
-        this.sprite = options.sprite || null; // A single static image (Image object)
+        this.sprite = null; // Will be loaded by loadSprite
+        this.spritePath = options.spritePath || null; // Path to the sprite image
+        this.spriteLoaded = false;
+        this.spriteWidth = options.width || 10; // Default width
+        this.spriteHeight = options.height || 10; // Default height
         this.animations = options.animations || {}; // { 'idle': { frames: [img1, img2], speed: 0.1 }, 'run': {...} }
         this.currentAnimation = null;
         this.currentFrame = 0;
@@ -45,10 +49,35 @@ class Entity {
         this.setAnimation(this.state); // Try setting initial animation based on state
 
         // Ensure collision bounds match sprite/animation if provided
-        this.updateBoundsFromSprite();
-
         // Visual properties
         this.color = options.color || 'grey'; // Default fallback color
+
+        // Load sprite if path provided
+        if (this.spritePath) {
+            this.loadSprite(this.spritePath);
+        } else {
+            // If no sprite path, use default bounds immediately
+            this.updateBoundsFromSize();
+        }
+    }
+
+    // --- NEW: Sprite Loading ---
+    loadSprite(path) {
+        this.sprite = new Image();
+        this.sprite.onload = () => {
+            this.spriteLoaded = true;
+            this.spriteWidth = this.sprite.naturalWidth;
+            this.spriteHeight = this.sprite.naturalHeight;
+            this.updateBoundsFromSize(); // Update bounds based on loaded sprite size
+            console.log(`Sprite loaded: ${path} (${this.spriteWidth}x${this.spriteHeight}) for Entity ${this.id}`);
+        };
+        this.sprite.onerror = () => {
+            console.error(`Failed to load sprite: ${path} for Entity ${this.id}`);
+            this.spriteLoaded = false;
+            // Fallback to default size if loading fails
+            this.updateBoundsFromSize();
+        };
+        this.sprite.src = path;
     }
 
     // --- Health Methods ---
@@ -125,30 +154,19 @@ class Entity {
         if (this.frameTimer >= frameDuration) {
             this.frameTimer -= frameDuration; // Reset timer, keeping leftover time
             this.currentFrame = (this.currentFrame + 1) % this.currentAnimation.frames.length;
-            this.updateBoundsFromSprite(); // Update bounds if frame size changes (less common)
+        this.updateBoundsFromSize(); // Update bounds if frame size changes (less common)
         }
     }
 
-    updateBoundsFromSprite() {
-        let width = this.collisionBounds.width;
-        let height = this.collisionBounds.height;
-
-        if (this.currentAnimation && this.currentAnimation.frames && this.currentAnimation.frames[this.currentFrame]) {
-            const frame = this.currentAnimation.frames[this.currentFrame];
-            // Assuming frames are Image objects or have width/height properties
-            if (frame.width && frame.height) {
-                width = frame.width;
-                height = frame.height;
-            }
-        } else if (this.sprite && this.sprite.width && this.sprite.height) {
-            width = this.sprite.width;
-            height = this.sprite.height;
-        }
-
+    // Renamed and simplified: Update bounds based on spriteWidth/spriteHeight
+    updateBoundsFromSize() {
         // Update collision bounds size (keeping offset relative to x,y)
-        this.collisionBounds.width = width;
-        this.collisionBounds.height = height;
-        // You might want to adjust collisionBounds.x/y here too if the origin isn't top-left
+        // Use the stored spriteWidth/Height which might come from options or loaded sprite
+        this.collisionBounds.width = this.spriteWidth;
+        this.collisionBounds.height = this.spriteHeight;
+        // Center the collision bounds by default
+        this.collisionBounds.x = -this.spriteWidth / 2;
+        this.collisionBounds.y = -this.spriteHeight / 2;
     }
 
 
@@ -334,11 +352,12 @@ updateFlash(deltaTime) {
         // this.velocityY = 0;
     }
 
-    // Helper to get absolute bounds position
+    // Helper to get absolute bounds position (centered based on x,y)
     getAbsoluteBounds() {
+        // Assumes collisionBounds x/y are offsets from the center (this.x, this.y)
         return {
-            x: this.x + this.collisionBounds.x,
-            y: this.y + this.collisionBounds.y,
+            x: this.x + this.collisionBounds.x, // x - width/2
+            y: this.y + this.collisionBounds.y, // y - height/2
             width: this.collisionBounds.width,
             height: this.collisionBounds.height
         };
@@ -354,7 +373,7 @@ updateFlash(deltaTime) {
     }
 
     // --- Drawing ---
-// Enhanced draw method to show improved flash and effects
+// Updated draw method for sprites, size increase, and image smoothing
 draw(context) {
     if (this.state === 'dead' && !(this.currentAnimation && this.currentAnimation.name === 'death')) {
         // Optionally hide if dead and no death animation playing
@@ -362,73 +381,64 @@ draw(context) {
     }
 
     let drawn = false;
-    const bounds = this.getAbsoluteBounds(); // Get bounds once for drawing
+    // Reverted: Scaling is handled by Phaser GameObject's setScale method
+    const drawWidth = this.spriteWidth; // Use natural width
+    const drawHeight = this.spriteHeight; // Use natural height
+    const drawX = this.x - drawWidth / 2; // Center the drawing at this.x
+    const drawY = this.y - drawHeight / 2; // Center the drawing at this.y
 
     // --- Draw Enhanced Shadow ---
-    // Enhanced oval shadow below the entity
-    context.fillStyle = 'rgba(0, 0, 0, 0.3)'; // Semi-transparent black
+    // This shadow logic might not be used if Phaser handles shadows separately
+    context.fillStyle = 'rgba(0, 0, 0, 0.3)';
     context.beginPath();
     context.ellipse(
-        bounds.x + bounds.width / 2,    // Center X
-        bounds.y + bounds.height,       // Bottom Y
-        bounds.width / 2 * 0.8,         // Radius X (slightly smaller than width)
-        bounds.height / 4,              // Radius Y (flattened)
-        0,                              // Rotation
-        0,                              // Start Angle
-        Math.PI * 2                     // End Angle
+        this.x,                         // Center X of entity
+        this.y + drawHeight * 0.4,      // Slightly below the entity center (using natural height)
+        drawWidth / 2 * 0.8,            // Radius X based on natural width
+        drawHeight / 4,                 // Radius Y based on natural height (flattened)
+        0, 0, Math.PI * 2
     );
     context.fill();
     // --- End Draw Shadow ---
 
+    // Disable image smoothing for pixel art
+    context.imageSmoothingEnabled = false;
 
     // Try drawing animation frame
     if (this.currentAnimation && this.currentAnimation.frames && this.currentAnimation.frames.length > 0) {
         const frame = this.currentAnimation.frames[this.currentFrame];
-        if (frame) {
-            // Assuming frame is an Image object or similar drawable
-            // Adjust drawing position if sprite origin isn't top-left
-            context.drawImage(frame, this.x, this.y, frame.width, frame.height);
+        if (frame && frame.width && frame.height) { // Check if frame is valid image/canvas
+            context.drawImage(frame, drawX, drawY, drawWidth, drawHeight);
             drawn = true;
         }
     }
 
-    // Fallback to static sprite if no animation frame drawn
-    if (!drawn && this.sprite) {
-        context.drawImage(this.sprite, this.x, this.y, this.sprite.width, this.sprite.height);
+    // Fallback to static sprite if no animation frame drawn or sprite is loaded
+    if (!drawn && this.spriteLoaded && this.sprite) {
+        context.drawImage(this.sprite, drawX, drawY, drawWidth, drawHeight);
         drawn = true;
     }
 
     // Fallback to basic rectangle if no sprite/animation drawn
     if (!drawn) {
-        // Special handling for stunned enemies - pulse effect blending with original color
-        if (this.isStunned && this.type === 'enemy') {
-            // Calculate pulsing value (0.7 to 1.0)
-            const now = Date.now() / 1000;
-            const pulseValue = 0.7 + (Math.sin(now * 8) + 1) * 0.15; // Ranges roughly 0.7 to 1.0
+        const bounds = this.getAbsoluteBounds(); // Use bounds for fallback rectangle
+        context.fillStyle = this.color;
+        context.fillRect(bounds.x, bounds.y, bounds.width, bounds.height); // Use original bounds size for fallback
 
-            // Blend original color with white for stun pulse
-            // Draw base color first
-            context.fillStyle = this.color;
-            context.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
-            // Overlay semi-transparent white pulse (adjust 0.6 for intensity)
-            context.fillStyle = `rgba(255, 255, 255, ${pulseValue * 0.6})`;
-            // The fillRect below will draw the white overlay
-        } else {
-            context.fillStyle = this.color; // Use stored fallback color
-        }
-        context.fillRect(bounds.x, bounds.y, bounds.width, bounds.height); // Draws base color OR stun overlay
-
-        // Draw velocity vector for debugging
-        context.strokeStyle = 'blue';
-        context.beginPath();
-        context.moveTo(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
-        context.lineTo(bounds.x + bounds.width / 2 + this.velocityX * 0.1, bounds.y + bounds.height / 2 + this.velocityY * 0.1); // Scale vector for visibility
-        context.stroke();
+        // Draw velocity vector for debugging (optional)
+        // context.strokeStyle = 'blue';
+        // context.beginPath();
+        // context.moveTo(this.x, this.y);
+        // context.lineTo(this.x + this.velocityX * 0.1, this.y + this.velocityY * 0.1);
+        // context.stroke();
     }
+
+    // Re-enable image smoothing if needed elsewhere (optional, depends on game style)
+    // context.imageSmoothingEnabled = true;
 
     // Draw enhanced flash effect if active
     if (this.isFlashing) {
-        context.save(); // Save current context state
+        context.save();
         
         // Enhanced flash effect with intensity fade
         context.globalAlpha = 0.75 * this.flashIntensity;

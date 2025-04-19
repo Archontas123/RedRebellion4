@@ -15,6 +15,7 @@ export class TurretEnemy extends Enemy {
             attackPower: options.attackPower || 8,
             projectileSpeed: options.projectileSpeed || 250,
             damageAmount: 0, // No contact damage
+            spritePath: 'assets/turret.png', // Added sprite path
             ...options,
             type: 'turret_enemy', // Specific type identifier
             // Remove properties not needed for a stationary turret

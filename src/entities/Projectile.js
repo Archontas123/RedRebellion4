@@ -66,9 +66,17 @@ export class Projectile extends Entity {
         }
 
         // Specific collision logic based on projectile type
+        // --- DEBUG LOGGING ---
+        console.log(`[Projectile.handleCollision] Collision detected: Projectile ${this.id} (Type: ${this.type}, Owner: ${this.ownerId}) vs Entity ${otherEntity.id} (Type: ${otherEntity.type})`);
+        // --- END DEBUG LOGGING ---
+
         if (this.type === 'enemy_projectile' && otherEntity.type === 'player') {
-            // console.log(`Projectile ${this.id} hit Player ${otherEntity.id}`);
-            otherEntity.takeDamage(this.damage);
+            // --- ADD LOGGING ---
+            console.log(`[Projectile.handleCollision] Condition met: Projectile ${this.id} (Type: ${this.type}) vs Player ${otherEntity.id} (Type: ${otherEntity.type}). Damage: ${this.damage}`);
+            // --- END LOGGING ---
+            // Pass 'this' (the projectile) as the source for knockback calculation
+            console.log(`[Projectile.handleCollision] Calling takeDamage on Player ${otherEntity.id}`); // DEBUG LOG
+            otherEntity.takeDamage(this.damage, this); 
             this.destroy(); // Destroy projectile on hit
         } else if (this.type === 'player_projectile' && (otherEntity.type === 'enemy' || otherEntity.type === 'ranged_enemy' || otherEntity.type === 'engineer' || otherEntity.type === 'drone_enemy')) { // Added 'drone_enemy'
             // Example if player could shoot projectiles

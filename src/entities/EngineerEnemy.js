@@ -12,7 +12,8 @@ export class EngineerEnemy extends Enemy {
             moveSpeed: 60,
             damageAmount: 0,
             color: '#FFFF00',
-            size: 80,
+            spritePath: 'assets/engineer.png', // Added sprite path
+            // size: 80, // Size will be determined by sprite
             ...options,
             scene: options.scene,
         };
@@ -432,6 +433,8 @@ onDeath() {
     }
 
     // Removed draw override - rely on parent Entity draw method
+
+    // Removed size property as it's derived from sprite now
 
     /**
      * Override the parent stun method to make the Engineer immune to stuns.

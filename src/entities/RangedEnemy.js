@@ -14,6 +14,9 @@ export class RangedEnemy extends Enemy {
             attackPower: options.attackPower || 10, // Damage per shot
             projectileSpeed: options.projectileSpeed || 300, // Speed of the projectile
             retreatDistance: options.retreatDistance || 300, // Increased retreat distance
+            spritePath: 'assets/ranged_enemy.png', // Added sprite path
+            // color: '#90EE90', // Color determined by sprite
+            // size: 40, // Size determined by sprite
             ...options, // Allow overriding defaults
             type: 'ranged_enemy', // Specific type identifier
         };

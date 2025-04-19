@@ -8,12 +8,23 @@ export class Player extends Entity {
         // Default player options
         const playerOptions = {
             type: 'player',
-            maxHealth: options.maxHealth || 100,
+            maxHealth: options.maxHealth || 150, // Increased base health by 50%
             friction: options.friction || 0.85, // Slightly higher friction for more responsive controls
+            spritePath: 'assets/hero.png', // Added sprite path
             ...options,
         };
 
         super(x, y, playerOptions);
+
+        // Override collision bounds AFTER super() call to make hitbox larger
+        const newHitboxWidth = 60; // Increased from sprite default
+        const newHitboxHeight = 60;
+        this.collisionBounds = {
+            x: -newHitboxWidth / 2, // Keep it centered relative to player's x,y
+            y: -newHitboxHeight / 2,
+            width: newHitboxWidth,
+            height: newHitboxHeight
+        };
 
         // Store scene reference if provided
         this.scene = options.scene || null;
@@ -825,14 +836,46 @@ updateCurrentTileCoords() {
 // Visual effect for double hit (damage powerup) removed
 
     // Override takeDamage to implement player-specific damage handling
-    takeDamage(amount) {
+    // Added 'source' parameter to get projectile info for knockback
+    takeDamage(amount, source = null) {
         // Reduce damage if dashing (optional dodge mechanic)
         const actualDamage = this.isDashing ? amount * 0.5 : amount;
-        
+
         super.takeDamage(actualDamage);
         console.log(`Player took ${actualDamage} damage, health: ${this.health}/${this.maxHealth}`);
-        
-        // Could add screen shake, flash, etc. here
+
+        // --- Add Impact Effects ---
+        if (this.scene) {
+            // 1. Screen Shake
+            if (this.scene.cameras && this.scene.cameras.main) {
+                this.scene.cameras.main.shake(150, 0.008); // Duration, Intensity
+            }
+
+            // 2. Visual Hit Indicator
+            if (this.scene.createImpactEffect) {
+                // Create effect at player's position
+                this.scene.createImpactEffect(this.x, this.y, 1); // Position, scale/intensity
+            }
+
+            // 3. Knockback (using the 'source' projectile)
+            if (source && typeof source.velocityX !== 'undefined' && typeof source.velocityY !== 'undefined') {
+                const knockbackForce = 300; // Adjust force as needed
+                const sourceSpeed = Math.sqrt(source.velocityX * source.velocityX + source.velocityY * source.velocityY);
+
+                if (sourceSpeed > 0) {
+                    // Calculate knockback direction (same as projectile velocity direction)
+                    const knockbackDirX = source.velocityX / sourceSpeed;
+                    const knockbackDirY = source.velocityY / sourceSpeed;
+
+                    // Apply knockback impulse
+                    this.velocityX += knockbackDirX * knockbackForce;
+                    this.velocityY += knockbackDirY * knockbackForce;
+
+                    console.log(`Applied knockback: Force=${knockbackForce}, DirX=${knockbackDirX.toFixed(2)}, DirY=${knockbackDirY.toFixed(2)}`);
+                }
+            }
+        }
+        // --- End Impact Effects ---
     }
 
     // Override onDeath for player-specific death behavior

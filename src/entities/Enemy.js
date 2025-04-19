@@ -8,6 +8,9 @@ export class Enemy extends Entity {
             maxHealth: options.maxHealth || 50,
             friction: options.friction || 0.9, // Moderate friction
             collisionBounds: options.collisionBounds || { x: 0, y: 0, width: 40, height: 40 }, // Slightly smaller than player
+            spritePath: 'assets/enemy.png', // Added default sprite path
+            // color: options.color || 'red', // Color determined by sprite
+            // size: options.size || 30, // Size determined by sprite
             ...options,
         };
 
@@ -354,10 +357,9 @@ super.update(deltaTime);
 
         // Define minimum distance based on approximate collision sizes
         // Assuming both player and enemy are roughly 40 units wide/tall
-        const minDistance = 40; // Stop when centers are this close
-
         // --- Flanking and Movement Logic ---
-        if (distance > minDistance) { // Only move if not too close
+        // Removed minDistance check - let collision handle proximity
+        // if (distance > minDistance) { // Only move if not too close
             const normalizedX = dx / distance; // Direction directly TO player
             const normalizedY = dy / distance;
 
@@ -398,12 +400,12 @@ super.update(deltaTime);
             this.velocityX = finalCombinedX * this.moveSpeed;
             this.velocityY = finalCombinedY * this.moveSpeed;
 
-        } else {
-            // If too close, stop base movement.
-            // Separation/Avoidance forces might still apply.
-            this.velocityX = 0;
-            this.velocityY = 0;
-        }
+        // } else { // Removed else block for minDistance check
+        //     // If too close, stop base movement.
+        //     // Separation/Avoidance forces might still apply.
+        //     this.velocityX = 0;
+        //     this.velocityY = 0;
+        // }
         // --- End Flanking and Movement Logic ---
     }
 

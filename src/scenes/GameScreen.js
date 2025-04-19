@@ -68,7 +68,7 @@ export default class GameScreen extends Phaser.Scene {
         this.startTime = 0;
         this.elapsedTime = 0; // In seconds
         this.bossKilled = false; // Track if the boss was killed during this run
-        this.scoreDisplayElement = null; // Reference to the HTML score display element
+        // Removed: this.scoreDisplayElement = null;
         this.instructionsContainer = null; // Container for instructions UI
         this.instructionsOverlay = null; // Overlay for instructions pause state
 
@@ -99,6 +99,16 @@ export default class GameScreen extends Phaser.Scene {
         // Load the bullet images
         this.load.image('bullet', 'assets/bullet.png');
         this.load.image('plasma_bullet', 'assets/Plasma_Bullet.png'); // Load the new plasma bullet
+
+        // --- Load Entity Sprites ---
+        this.load.image('hero_sprite', 'assets/hero.png');
+        this.load.image('enemy_sprite', 'assets/enemy.png');
+        this.load.image('engineer_sprite', 'assets/engineer.png');
+        this.load.image('turret_sprite', 'assets/turret.png');
+        this.load.image('drone_sprite', 'assets/drone.png');
+        this.load.image('ranged_sprite', 'assets/ranged_enemy.png');
+        // Add other enemy sprites here if needed (e.g., splitter)
+        // this.load.image('splitter_sprite', 'assets/splitter.png');
     }
 
     create() {
@@ -131,15 +141,10 @@ export default class GameScreen extends Phaser.Scene {
         });
         this.player.scene = this; // Give player a reference to the scene
 
-        // Create the visual representation for the player in Phaser
-        // Using a rectangle for now, replace with sprite if you have one
-        this.playerVisual = this.add.rectangle(
-            this.player.x,
-            this.player.y,
-            TILE_SIZE, // Set visual width to TILE_SIZE
-            TILE_SIZE, // Set visual height to TILE_SIZE
-            0x00ff00 // Green color
-        );
+        // --- Create Player Sprite Visual ---
+        this.playerVisual = this.add.image(this.player.x, this.player.y, 'hero_sprite');
+        this.playerVisual.setScale(3.75); // Apply 3.75x size increase (2.5 * 1.5)
+        this.playerVisual.texture.setFilter(Phaser.Textures.FilterMode.NEAREST); // Disable smoothing
         this.playerVisual.setDepth(1); // Ensure player visual is above terrain
 
         // Create Graphics object for the shadow
@@ -331,15 +336,7 @@ export default class GameScreen extends Phaser.Scene {
         if (!this.countdownDisplayElement) {
             console.error("Countdown display element not found in HTML!");
         }
-        // --- Score Display UI Setup ---
-        this.scoreDisplayElement = document.getElementById('score-display');
-        if (this.scoreDisplayElement) {
-            this.scoreDisplayElement.style.display = 'block'; // Show the element
-            this.scoreDisplayElement.innerText = `Score: 0`; // Initial value
-        } else {
-            console.error("Score display element ('score-display') not found in HTML!");
-        }
-        // --- End Score Display UI Setup ---
+        // --- Score Display UI Setup REMOVED ---
 
         // --- Instructions UI Setup ---
         this.createInstructionsUI();
@@ -351,6 +348,11 @@ export default class GameScreen extends Phaser.Scene {
         this.kills = 0;
         this.deaths = 0;
         this.bossKilled = false; // Reset boss kill status for new game
+
+        // --- Add key listener for Instructions (H key) ---
+        this.input.keyboard.on('keydown-H', () => {
+            this.createInstructionsUI();
+        });
     }
 
     update(time, delta) {
@@ -375,17 +377,19 @@ export default class GameScreen extends Phaser.Scene {
 
         // --- Draw Player Shadow ---
         this.playerShadow.clear(); // Clear previous shadow drawing
-        if (this.player.state !== 'dead') { // Don't draw shadow if dead
-            const bounds = this.player.getAbsoluteBounds(); // Use bounds from the Player instance
-            const shadowOffsetY = 5;
+        if (this.player.state !== 'dead' && this.playerVisual) { // Don't draw shadow if dead, ensure visual exists
+            // Use the scaled dimensions of the visual sprite for the shadow
+            const visualWidth = this.playerVisual.displayWidth; // Gets width after scaling
+            const visualHeight = this.playerVisual.displayHeight; // Gets height after scaling
+            const shadowOffsetY = 8; // Adjust offset based on new size
             const shadowScaleX = 0.8;
             const shadowScaleY = 0.4;
             const shadowAlpha = 0.3;
 
             const shadowX = this.player.x; // Center shadow on player's logical x
-            const shadowY = this.player.y + bounds.height / 2 + shadowOffsetY; // Position below the logical bottom center
-            const shadowRadiusX = (bounds.width / 2) * shadowScaleX;
-            const shadowRadiusY = shadowRadiusX * shadowScaleY;
+            const shadowY = this.player.y + visualHeight * 0.4 + shadowOffsetY; // Position below the visual center, adjusted offset
+            const shadowRadiusX = (visualWidth / 2) * shadowScaleX;
+            const shadowRadiusY = (visualHeight / 4) * shadowScaleY; // Make shadow flatter relative to height
 
             if (shadowRadiusX > 0 && shadowRadiusY > 0) {
                 this.playerShadow.fillStyle(0x000000, shadowAlpha); // Black, semi-transparent
@@ -421,18 +425,27 @@ export default class GameScreen extends Phaser.Scene {
 
                 // Ensure visual exists for active enemy
                 if (!this.enemyVisuals.has(enemy.id)) {
-                    console.log(`[GameScreen] Attempting to create visual for new enemy ID: ${enemy.id}, Type: ${enemy.constructor.name}`); // <-- ADDED LOG
-                    // Use fillColor if available, otherwise fallback to color
-                    const fillColor = enemy.fillColor !== undefined ? enemy.fillColor : enemy.color;
-                    const enemyVisual = this.add.rectangle(
-                        enemy.x, enemy.y,
-                        enemy.collisionBounds.width, // Use enemy's bounds
-                        enemy.collisionBounds.height,
-                        fillColor // Use the determined fill color
-                    );
+                    console.log(`[GameScreen] Creating sprite visual for new enemy ID: ${enemy.id}, Type: ${enemy.constructor.name}`);
+                    let textureKey = 'enemy_sprite'; // Default fallback
+                    switch (enemy.constructor.name) {
+                        case 'Player': textureKey = 'hero_sprite'; break; // Should not happen here, but safety
+                        case 'Enemy': textureKey = 'enemy_sprite'; break;
+                        case 'EngineerEnemy': textureKey = 'engineer_sprite'; break;
+                        case 'TurretEnemy': textureKey = 'turret_sprite'; break;
+                        case 'DroneEnemy': textureKey = 'drone_sprite'; break;
+                        case 'RangedEnemy': textureKey = 'ranged_sprite'; break;
+                        // Add cases for other enemy types like Splitter if they have sprites
+                        // case 'SplitterEnemy': textureKey = 'splitter_sprite'; break;
+                        default:
+                            console.warn(`No specific sprite key found for enemy type: ${enemy.constructor.name}. Using default.`);
+                    }
+
+                    const enemyVisual = this.add.image(enemy.x, enemy.y, textureKey);
+                    enemyVisual.setScale(3.75); // Apply 3.75x size increase (2.5 * 1.5)
+                    enemyVisual.texture.setFilter(Phaser.Textures.FilterMode.NEAREST); // Disable smoothing
                     enemyVisual.setDepth(0.95); // Slightly above shadow, below player
                     this.enemyVisuals.set(enemy.id, enemyVisual);
-                    console.log(`[GameScreen] Visual created and added for enemy ID: ${enemy.id}`); // <-- ADDED LOG
+                    console.log(`[GameScreen] Sprite visual created and added for enemy ID: ${enemy.id} using key ${textureKey}`);
                 }
 
                 // Sync enemy visual position
@@ -449,17 +462,19 @@ export default class GameScreen extends Phaser.Scene {
                     }
 
                     shadow.clear();
-                    if (enemy.state !== 'dead') {
-                        const bounds = enemy.getAbsoluteBounds();
-                        const shadowOffsetY = 5;
+                    if (enemy.state !== 'dead' && visual) { // Ensure visual exists for shadow calculation
+                        // Use the scaled dimensions of the visual sprite for the shadow
+                        const visualWidth = visual.displayWidth;
+                        const visualHeight = visual.displayHeight;
+                        const shadowOffsetY = 8; // Adjust offset based on new size
                         const shadowScaleX = 0.8;
                         const shadowScaleY = 0.4;
                         const shadowAlpha = 0.3;
 
                         const shadowX = enemy.x; // Center shadow on enemy's logical x
-                        const shadowY = enemy.y + bounds.height / 2 + shadowOffsetY; // Position below the logical bottom center
-                        const shadowRadiusX = (bounds.width / 2) * shadowScaleX;
-                        const shadowRadiusY = shadowRadiusX * shadowScaleY;
+                        const shadowY = enemy.y + visualHeight * 0.4 + shadowOffsetY; // Position below the visual center, adjusted offset
+                        const shadowRadiusX = (visualWidth / 2) * shadowScaleX;
+                        const shadowRadiusY = (visualHeight / 4) * shadowScaleY; // Make shadow flatter relative to height
 
                         if (shadowRadiusX > 0 && shadowRadiusY > 0) {
                             shadow.fillStyle(0x000000, shadowAlpha); // Black, semi-transparent
@@ -530,14 +545,16 @@ export default class GameScreen extends Phaser.Scene {
             if (projectile.ownerId !== this.player.id && this.player.state !== 'dead') {
                 // Use the projectile's checkCollision method
                 if (projectile.checkCollision(this.player, dtSeconds)) {
-                    // Let the projectile handle the collision logic internally
-                    projectile.handleCollision(this.player);
-                    // If the projectile is now dead after handling collision, skip further checks
-                    if (projectile.state === 'dead') return;
+                    // --- MOVED VISUAL EFFECTS BEFORE HANDLING ---
                     // Create impact effect at player location
                     this.createImpactEffect(this.player.x, this.player.y);
                     // Apply screen shake ONLY when player is hit
                     this.cameras.main.shake(100, 0.01);
+                    // --- END MOVED VISUAL EFFECTS ---
+
+                    // Let the projectile handle the collision logic internally
+                    projectile.handleCollision(this.player);
+                    // NOTE: Removed redundant 'if (projectile.state === 'dead') return;' check here
                 }
             }
 
@@ -812,11 +829,7 @@ if (this.tileCoordsElement && this.player) {
         const baseScore = (this.kills * POINTS_PER_KILL) + Math.floor(this.elapsedTime * POINTS_PER_SECOND) - (this.deaths * PENALTY_PER_DEATH);
         this.score = baseScore; // Update the score property
 
-        // --- Update Score Display UI ---
-        if (this.scoreDisplayElement) {
-            this.scoreDisplayElement.innerText = `Score: ${this.score}`;
-        }
-        // --- End Update Score Display UI ---
+        // --- Update Score Display UI REMOVED ---
 
     } // End of update method
 
@@ -896,8 +909,6 @@ handlePlayerDeath() {
 
     const deathX = this.player.x; // Capture death location
     const deathY = this.player.y;
-    console.log(`GameScreen: Handling player death at (${deathX.toFixed(0)}, ${deathY.toFixed(0)}).`);
-
     // --- Score Tracking: Increment Deaths ---
     this.deaths++;
     console.log(`Death registered. Total deaths: ${this.deaths}`);
@@ -924,7 +935,7 @@ handlePlayerDeath() {
     if (this.clearPlasmaButtonElement) this.clearPlasmaButtonElement.style.display = 'none'; // Hide clear plasma button
     if (this.bossHealthBarContainerElement) this.bossHealthBarContainerElement.style.display = 'none'; // Hide boss health bar
     if (this.gameLivesCounterElement) this.gameLivesCounterElement.style.display = 'none'; // Hide IN-GAME lives counter
-    if (this.scoreDisplayElement) this.scoreDisplayElement.style.display = 'none'; // Hide score display on death screen
+    // Removed: Hide score display on death screen
     // Note: HTML lives-display is no longer used
     if (this.countdownDisplayElement) this.countdownDisplayElement.style.display = 'none'; // Hide countdown on death
 
@@ -1223,7 +1234,7 @@ respawnPlayer() { // No longer needs death location
     }
     if (this.clearPlasmaButtonElement) this.clearPlasmaButtonElement.style.display = 'block'; // Show clear plasma button
     if (this.gameLivesCounterElement) this.gameLivesCounterElement.style.display = 'block'; // Show IN-GAME lives counter
-    if (this.scoreDisplayElement) this.scoreDisplayElement.style.display = 'block'; // Show score display on respawn
+    // Removed: Show score display on respawn
     // HTML lives-display is no longer used
     // Countdown display remains hidden on respawn unless explicitly shown by WaveManager update
 
@@ -1267,53 +1278,36 @@ getPlasmas() {
 }
 
 
-// Update enemy visuals including stun effects and flashing (Removed Bleed Tint)
+// Update enemy visuals including stun effects and flashing (Adapted for Sprites)
 updateEnemyVisuals() {
     this.enemies.forEach(enemy => {
         if (enemy.state === 'dead') return;
         const visual = this.enemyVisuals.get(enemy.id);
-        if (!visual) return;
-
-        // Prioritize enemy.color, then specific types, then fallback
-        let baseColor = enemy.color ? Phaser.Display.Color.ValueToColor(enemy.color).color : null; // Convert hex string/number if needed
-        if (baseColor === null) { // If enemy.color wasn't set or invalid
-            baseColor = (enemy.type === 'ranged_enemy') ? 0xffa500 : 0xff0000; // Fallback: orange for ranged, red for others
-        }
+        if (!visual || !(visual instanceof Phaser.GameObjects.Image)) return; // Ensure it's an image
 
         // Handle flashing (overrides tint and stun visual)
         if (enemy.isFlashing) {
-            visual.setFillStyle(0xffffff); // White flash
-            visual.isTinted = false; // Ensure tint is off during flash
-            const flashProgress = enemy.hitEffectTimer / enemy.hitEffectDuration;
-            const scale = 1.0 + (0.3 * flashProgress);
-            visual.setScale(scale);
+            visual.setTint(0xffffff); // White tint for flash
+            visual.setAlpha(0.7 + 0.3 * Math.sin(this.time.now / 50)); // Simple flicker alpha
+            // visual.setScale(3.75 * (1 + 0.1 * Math.sin(this.time.now / 50))); // Optional subtle scale pulse
+            visual.setScale(3.75); // Keep base scale (3.75x) during flash for now
             if (enemy.stunEffect) { // Remove stun visual if flashing starts
                 if (enemy.stunEffect.active) enemy.stunEffect.destroy();
                 enemy.stunEffect = null;
             }
         } else {
-            // Not flashing: Reset fill color and scale
-            visual.setFillStyle(baseColor); // Use the determined baseColor
-            visual.setScale(1.0);
+            // Not flashing: Reset tint, alpha, and scale
+            visual.clearTint();
             visual.setAlpha(1);
-
-            // // Bleeding Tint Logic Removed
-            // if (enemy.isBleeding) {
-            //     visual.tint = 0xff0000;
-            //     visual.tintFill = true;
-            //     visual.isTinted = true;
-            // } else {
-            //     visual.isTinted = false;
-            // }
-            visual.isTinted = false; // Ensure tint is always considered false
-            // visual.clearTint(); // Rectangles don't have clearTint, fillStyle is reset above
+            visual.setScale(3.75); // Reset to base scale (3.75x)
 
             // Handle stun visual (independent of tint, but removed if flashing)
             if (enemy.isStunned) {
                 if (!enemy.stunEffect || !enemy.stunEffect.active) { // Check if active too
                     this.createOrUpdateStunEffect(enemy);
                 } else {
-                    enemy.stunEffect.setPosition(enemy.x, enemy.y - 30);
+                    // Update position if effect already exists
+                    enemy.stunEffect.setPosition(enemy.x, enemy.y - (visual.displayHeight / 2) - 10); // Position above sprite
                 }
             } else { // Not stunned (and not flashing)
                 if (enemy.stunEffect && enemy.stunEffect.active) { // Remove stun visual if no longer stunned and effect exists
@@ -1338,9 +1332,10 @@ createOrUpdateStunEffect(enemy) {
     // Only create if the enemy is actually stunned *now*
     if (!enemy.isStunned) return;
 
-    // Position above the enemy
+    // Position above the enemy sprite
+    const visual = this.enemyVisuals.get(enemy.id);
     const stunX = enemy.x;
-    const stunY = enemy.y - 30;
+    const stunY = enemy.y - (visual ? visual.displayHeight / 2 : 30) - 10; // Adjust Y based on sprite height
 
     // Create a container for the effect
     enemy.stunEffect = this.add.container(stunX, stunY);
@@ -2157,10 +2152,7 @@ shutdown() {
         if (this.countdownDisplayElement) {
             this.countdownDisplayElement.style.display = 'none';
         }
-        // Hide score display on shutdown
-        if (this.scoreDisplayElement) {
-            this.scoreDisplayElement.style.display = 'none';
-        }
+        // Removed: Hide score display on shutdown
 
         // Destroy WaveManager
         if (this.waveManager) {
@@ -2196,8 +2188,11 @@ shutdown() {
 
     // --- Instructions UI Creation & Dismissal ---
     createInstructionsUI() {
-        // Removed the check for this.scene.isPaused here, as it was preventing UI creation.
-        // We will still pause physics later in this function.
+        // Check if instructions are already shown
+        if (this.instructionsContainer) {
+            console.log("Instructions UI is already visible.");
+            return; // Don't create duplicates
+        }
 
         const padding = 15;
         const textWidth = 320; // Max width for text wrapping
@@ -2209,15 +2204,21 @@ shutdown() {
         const instructionsTextContent = `== MARS SURVIVAL PROTOCOL ==
 Controls:
   [W][A][S][D] - Maneuver Rover
-  [Left Click] - Fire Standard Issue Blaster
-  [Right Click] - Fire Plasma Overcharge (Consumes Plasma)
+  [Left Click] - Fire Current Weapon (Blaster or Railgun)
+  [E]          - Swap Weapons (Blaster <-> Railgun)
+
+Weapons:
+  Blaster: Standard rapid-fire energy weapon.
+  Railgun: Powerful piercing shot. Consumes Plasma. Charge by holding Left Click.
 
 Plasma Resource:
   Collect glowing blue Plasma dropped by deactivated hostiles.
-  Plasma fuels your powerful Overcharge shot. Manage it wisely, Recruit!
+  Plasma fuels your Railgun. Manage it wisely, Recruit!
 
 Objective:
-  Locate and neutralize the rogue Engineer unit. The fate of the Mars colony depends on you!`;
+  Locate and neutralize the rogue Engineer unit. The fate of the Mars colony depends on you!
+
+  [X] or [ESC] - Close this window`;
 
         const textStyle = {
             fontSize: '14px',
@@ -2290,16 +2291,36 @@ Objective:
         dismissButton.on('pointerover', () => dismissButton.setFill('#FFFFFF')); // White on hover
         dismissButton.on('pointerout', () => dismissButton.setFill('#FF6B00')); // Back to orange
 
-        // --- Pause the physics engine ---
+        // --- Add Keyboard Listeners for X and ESC keys ---
+        this.instructionsCloseKey = this.input.keyboard.addKey('X');
+        this.instructionsEscKey = this.input.keyboard.addKey('ESC');
+        this.instructionsCloseKey.on('down', () => {
+            this.dismissInstructions();
+        });
+        this.instructionsEscKey.on('down', () => {
+            this.dismissInstructions();
+        });
+
+        // --- Pause the game ---
         console.log(`UI elements added. Proceeding to pause physics.`);
         this.physics.pause();
-        console.log(`createInstructionsUI function completed.`); // Added final log
-        // Optional: Could add flags here to stop player/enemy update loops if physics pause isn't enough
+        console.log(`createInstructionsUI function completed.`);
     }
 
+    // Update the dismiss instructions method to clean up key listeners
     dismissInstructions() {
         if (this.instructionsContainer || this.instructionsOverlay) {
             console.log("Dismissing instructions and resuming GameScreen.");
+
+            // Clean up key listeners
+            if (this.instructionsCloseKey) {
+                this.instructionsCloseKey.removeAllListeners();
+                this.instructionsCloseKey = null;
+            }
+            if (this.instructionsEscKey) {
+                this.instructionsEscKey.removeAllListeners();
+                this.instructionsEscKey = null;
+            }
 
             // Fade out overlay and container simultaneously
             const targetsToFade = [];
@@ -2328,25 +2349,22 @@ Objective:
                         } else {
                             console.log("Physics was not paused when trying to resume.");
                         }
-                        // Optional: Reset any manual pause flags for entities here
                     }
                 });
             } else {
-                 // If somehow only one exists, destroy immediately and resume
-                 if (this.instructionsContainer) this.instructionsContainer.destroy();
-                 if (this.instructionsOverlay) this.instructionsOverlay.destroy();
-                 this.instructionsContainer = null;
-                 this.instructionsOverlay = null;
-                 // Resume physics
-                 if (this.physics.world.isPaused) {
-                     console.log("Resuming physics (no fade).");
-                     this.physics.resume();
-                 } else {
-                     console.log("Physics was not paused when trying to resume (no fade).");
-                 }
+                // If somehow only one exists, destroy immediately and resume
+                if (this.instructionsContainer) this.instructionsContainer.destroy();
+                if (this.instructionsOverlay) this.instructionsOverlay.destroy();
+                this.instructionsContainer = null;
+                this.instructionsOverlay = null;
+                // Resume physics
+                if (this.physics.world.isPaused) {
+                    console.log("Resuming physics (no fade).");
+                    this.physics.resume();
+                } else {
+                    console.log("Physics was not paused when trying to resume (no fade).");
+                }
             }
-        } else {
-             // No need for safety check here as we aren't pausing the scene anymore
         }
     }
     // --- End Instructions UI ---
